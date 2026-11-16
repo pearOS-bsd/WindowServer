@@ -1,0 +1,58 @@
+name: WindowServer
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# wsd needs SkyLight (github.com/pearOS-bsd/SkyLight, the protocol): checked out next to the sources and passed with SKYLIGHT=
+jobs:
+  # The real target: FreeBSD on x86_64 (QEMU). Runs the test suite and renders the test window with the software compositor.
+  freebsd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: pearOS-bsd/SkyLight, path: SkyLight }
+      - name: Build, test and render on FreeBSD x86_64
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          arch: x86_64
+          usesh: true
+          prepare: |
+            pkg install -y gmake pkgconf python3
+          run: |
+            set -e
+            uname -a
+            SK="SKYLIGHT=$PWD/SkyLight"
+            gmake $SK
+            gmake $SK check
+            gmake $SK demo OUT=freebsd-sw
+            ls -l *.png *.ppm || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: freebsd-screenshots
+          path: "*.png"
+          if-no-files-found: warn
+
+  # The development machine's platform (arm64 macOS): the same suite, headless.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: pearOS-bsd/SkyLight, path: SkyLight }
+      - name: Build, test and render
+        run: |
+          make SKYLIGHT=$PWD/SkyLight
+          make SKYLIGHT=$PWD/SkyLight check
+          make SKYLIGHT=$PWD/SkyLight demo OUT=macos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshots
+          path: "*.png"
+          if-no-files-found: warn
