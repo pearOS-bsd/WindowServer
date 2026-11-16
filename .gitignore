@@ -1,7 +1,6 @@
 wsd
-test_*
-!test_*.c
-!test_*.m
+/test_*
+!/test_*.c
 *.o
 *.a
 window.ppm
