@@ -3,6 +3,7 @@ CC      ?= cc
 CFLAGS  ?= -O2 -g
 # SkyLight (github.com/pearOS-bsd/SkyLight): the SLS wire headers, the server handlers (server/sls_*.c), the client shim (client/skylight.c)
 SKYLIGHT ?= ../SkyLight
+COREUI ?= ../CoreUI
 CFLAGS  += -std=c99 -D_DEFAULT_SOURCE -D_BSD_SOURCE -Wall -Wextra -Iinclude -Isrc -I$(SKYLIGHT)/include -I$(SKYLIGHT)/server
 LDLIBS   = -lm
 CORE     = src/input.c src/keymap.c src/cursor.c src/fps.c src/compositor_sw.c src/blur.c src/server.c src/shadow.c src/region.c src/ipc.c src/evrec.c src/buffer.c
@@ -105,7 +106,7 @@ full: clean
 	$(MAKE) wsd test_window EXTRA_SRC="src/backend_kms.c src/evdev.c src/touchpad.c src/vt_switch.c src/compositor_gl.c" EXTRA_CFLAGS="-DWS_KMS -DWS_GL -DWS_GBM -DWS_EGL `pkg-config --cflags libdrm egl gbm glesv2`" EXTRA_LIBS="`pkg-config --libs libdrm egl gbm glesv2`"
 
 check: test_bplist test_input test_touchpad test_fxcache test_damage test_compose test_region test_evrec test_buffer test_diff wsd test_wire test_interactive test_robust test_golden test_generic test_props test_shim test_shim2 test_shim3 test_shim4 test_shim2
-	$(MAKE) -C coreui check
+	@if [ -d "$(COREUI)" ]; then $(MAKE) -C "$(COREUI)" check; else echo "(CoreUI not found: skipping its tests; COREUI=path of the CoreUI repository)"; fi
 	./test_input
 	./test_touchpad
 	./test_fxcache
