@@ -1,0 +1,8 @@
+wsd
+test_*
+!test_*.c
+!test_*.m
+*.o
+*.a
+window.ppm
+window.png
