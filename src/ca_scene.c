@@ -246,6 +246,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 	uint8_t *ool0 = NULL; size_t osz = 0;
 	if (mid == 0x9c43 && (bits & 0x80000000u) && n_ool >= 1 && cur_ool_msg >= 0) {	/* a large commit: its command stream is the first out-of-line descriptor, the images follow */
 		ool0 = ool_loader(ool_ctx, cur_ool_msg, ool_desc[0], &osz); ool_taken = 1;
+		if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: large commit %d: stream %zu bytes (%s), %d out-of-line descriptors\n", cur_ool_msg, osz, ool0 ? "loaded" : "NOT LOADED", n_ool);
 		if (ool0 == NULL) return;
 	}
 	rd r = ool0 ? (rd){ ool0, osz, 0, 0 } : (rd){ m + st, n - st, 0, 0 };
@@ -372,6 +373,7 @@ static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, doubl
 	layer_t *l = find(id);
 	int H = win->h;
 	if (!l || depth > 64) return;
+	if (getenv("CA_PAINT_DEBUG") && depth <= 1) fprintf(stderr, "ca_scene: paint depth %d id %llx at %.1f,%.1f size %.1fx%.1f parent origin %.1f,%.1f nsubs %d\n", depth, (unsigned long long)id, l->px_, l->py_, l->w, l->h, ox, oy, l->nsubs);
 	double x = ox + l->px_ - l->w / 2, y = oy + l->py_ - l->h / 2, o = l->any_col ? l->col[4] : 1.0, a = l->any_col ? l->col[3] : 0.0;
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
