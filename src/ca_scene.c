@@ -193,9 +193,11 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	if (!l) return;
 	double d[6]; memcpy(d, pod + 0x28, sizeof d);
 	float col[5]; memcpy(col, pod, sizeof col);
-	l->px_ = d[0]; l->py_ = d[1]; l->w = d[4]; l->h = d[5];
-	memcpy(l->col, col, sizeof col);
-	l->any_col = col[0] != 0 || col[1] != 0 || col[2] != 0 || col[3] != 0 || col[4] != 0;
+	if (d[4] > 0 && d[5] > 0) {		/* a record with geometry; a later record that only changes the contents (an implicit animation of "contents": ControlCenter updating its clock) carries a zero block and must not reset the layer */
+		l->px_ = d[0]; l->py_ = d[1]; l->w = d[4]; l->h = d[5];
+		memcpy(l->col, col, sizeof col);
+		l->any_col = col[0] != 0 || col[1] != 0 || col[2] != 0 || col[3] != 0 || col[4] != 0;
+	}
 	if (hassubs) { l->nsubs = ns; memcpy(l->subs, subs, sizeof(uint64_t) * ns); }
 	if (ct.kind) {
 		l->img = ct.imgid;
@@ -277,6 +279,14 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 		else if (op == 0xd) u32(&r);
 		else if (op == 0x20) { u32(&r); u8(&r); }
 		else if (op == 0x25) ;
+		else if (op == 4) {			/* add_animation (layer id, an Animation object): not decoded yet (BasicAnimation, Timing, KeyframeAnimation ...); CoreAnimation sends one when a layer's contents change (the implicit "contents" action): go on at the next layer record */
+			size_t q;
+			for (q = r.p; q + 14 <= r.n; q++)
+				if (r.b[q] == 0x02 && r.b[q + 11] == 0 && r.b[q + 12] == 0 && r.b[q + 13] == 0x1e) break;
+			if (q + 14 > r.n) break;
+			if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: animation skipped, next record at %zu of %zu\n", q, r.n);
+			r.p = q; skipped++;
+		}
 		else if (op == 0x1f) u8(&r);
 		else break;
 	}
