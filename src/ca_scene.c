@@ -206,7 +206,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 			uint8_t *px = ool_loader(ool_ctx, cur_ool_msg, ool_desc[ool_taken++], &sz);
 			if (px) {
 				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
-				if (sz >= (size_t)im.stride * ct.h) setimg(ct.imgid, &im); else free(px);
+				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * ct.bpp) setimg(ct.imgid, &im); else free(px);       /* the last row is not padded: 29 * 192 + 168 = 5736 bytes for 42 x 30 */
 			}
 		}
 	}
