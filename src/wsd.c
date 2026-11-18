@@ -473,6 +473,7 @@ static int do_create_window(conn *c, const uint8_t *buf, size_t len)
 	if (!wid) { free(rects); return reply_simple(c->fd, h, CGS_ERROR_FAILURE); }
 	ws_set_window_shape(srv, wid, rects, n);
 	free(rects);
+	if (rq.ca_context_id) wsd_bind_layer_ctx(wid, rq.ca_context_id);
 	sls_create_window_rep r;
 	memset(&r, 0, sizeof r);
 	{ mach_msg_header_t rh; fill_reply_header(&rh, h, sizeof r, 1); memcpy(&r.h, &rh, sizeof rh); }   /* r is packed */

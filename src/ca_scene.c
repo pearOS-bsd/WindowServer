@@ -25,7 +25,7 @@ static const uint8_t *raw(rd *r, size_t k) { const uint8_t *p = r->b + r->p; if 
 /* ---- the scene ---- */
 #define MAXL 4096
 #define MAXS 64
-typedef struct { int w, h, bpp; uint8_t *px; } img_t;
+typedef struct { int w, h, bpp, stride; uint8_t *px; } img_t;       /* stride: bytes of a row (the Image's row bytes: padded, 192 for 42 pixels) */
 typedef struct {
 	uint64_t id;
 	int used;
@@ -73,7 +73,7 @@ static void setimg(uint64_t id, img_t *im) { for (int i = 0; i < nIM; i++) if (I
 static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) return &IM[i].im; return NULL; }
 
 /* ---- decoder ---- */
-typedef struct { int kind; uint64_t id; int attached; int w, h, bpp; uint64_t imgid; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[32], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -151,7 +151,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		if (u8(r)) { contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { ct->kind = 1; ct->attached = in.attached; } }
 		else { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) { ct->kind = 1; ct->attached = 1; } }
 		texture_tail(r, flags_i);
-		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = w ? (int)(row0 / w) : 4; }
+		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = w ? (int)(row0 / w) : 4; ct->stride = (int)row0; }
 		break; }
 	case 0x1f: u32(r); u32(r); u8(r); break;
 	/* the formats below come from the decompilation of QuartzCore (CA::Render::<Class>::<Class>(Decoder*), REA/Ghidra) */
@@ -205,8 +205,8 @@ static void do_layer(rd *r, int depth, uint64_t id)
 			size_t sz = 0;
 			uint8_t *px = ool_loader(ool_ctx, cur_ool_msg, ool_desc[ool_taken++], &sz);
 			if (px) {
-				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.px = px;
-				if (sz >= (size_t)ct.w * ct.h * ct.bpp) setimg(ct.imgid, &im); else free(px);
+				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
+				if (sz >= (size_t)im.stride * ct.h) setimg(ct.imgid, &im); else free(px);
 			}
 		}
 	}
@@ -386,12 +386,12 @@ static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, doubl
 				if (sx >= im->w) sx = im->w - 1;
 				if (sy >= im->h) sy = im->h - 1;
 				if (im->bpp == 8) {
-					const uint16_t *s = (const uint16_t *)im->px + ((size_t)sy * im->w + sx) * 4;
+					const uint16_t *s = (const uint16_t *)(im->px + (size_t)sy * im->stride) + (size_t)sx * 4;
 					float fr = half(s[0]), fg = half(s[1]), fb = half(s[2]), fa = half(s[3]);
 					#define CL(v) ((v) != (v) ? 0 : (v) < 0 ? 0 : (v) > 1 ? 255 : (int)((v) * 255))
 					r = CL(fr); g = CL(fg); b = CL(fb); al = CL(fa);
 				} else {
-					const uint8_t *s = im->px + ((size_t)sy * im->w + sx) * 4;
+					const uint8_t *s = im->px + (size_t)sy * im->stride + (size_t)sx * 4;
 					b = s[0]; g = s[1]; r = s[2]; al = s[3];
 				}
 				blend(win, bx + i, by + j, r, g, b, (int)(al * op2));
