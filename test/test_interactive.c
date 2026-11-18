@@ -82,7 +82,7 @@ int main(int argc, char **argv)
 	snprintf(pa, sizeof pa, "%s-A.ppm", prefix); snprintf(pb, sizeof pb, "%s-B.ppm", prefix); snprintf(pc, sizeof pc, "%s-C.ppm", prefix);
 	snprintf(pd, sizeof pd, "%s-D.ppm", prefix); snprintf(pe, sizeof pe, "%s-E.ppm", prefix);
 	ws_conn *c = ws_connect(NULL);
-	if (!c) { fprintf(stderr, "test_interactive: cannot connect to wsd\n"); return 1; }
+	if (!c) { fprintf(stderr, "test_interactive: cannot connect to WindowServer\n"); return 1; }
 	ws_win w; ws_cbuf cb; uint32_t sid;
 	if (ws_win_create(c, (ws_rect){ WX, WY, W, H }, 0, &w) || ws_cbuf_create(c, W, H, &cb) || ws_surface_add(c, &w, &sid) ||
 	    ws_surface_bind_buffer(c, &w, sid, &cb)) { fprintf(stderr, "test_interactive: setup failed\n"); return 1; }

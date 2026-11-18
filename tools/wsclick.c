@@ -1,4 +1,4 @@
-/* wsclick x y [buttons]: moves the pointer to (x,y), presses and releases the left button (through the wsd test injection) */
+/* wsclick x y [buttons]: moves the pointer to (x,y), presses and releases the left button (through the WindowServer test injection) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

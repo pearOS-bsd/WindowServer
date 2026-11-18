@@ -15,9 +15,9 @@ FAMILIES     = $(SKYLIGHT)/server/sls_ext.c $(SKYLIGHT)/server/sls_session.c $(S
 EXTRA_CFLAGS =
 EXTRA_LIBS   =
 
-all: wsd test_bplist test_window test_interactive test_robust test_compose test_region test_wire test_evrec test_buffer test_diff
+all: WindowServer test_bplist test_window test_interactive test_robust test_compose test_region test_wire test_evrec test_buffer test_diff
 
-wsd: $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c $(HDRS)
+WindowServer: $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c $(HDRS)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c $(EXTRA_LIBS) $(LDLIBS) $$([ "$$(uname -s)" = Darwin ] || echo -lcrypto) -lz
 
 test_interactive: src/client.c src/compositor_sw.c src/region.c src/ipc.c src/evrec.c src/buffer.c test/test_interactive.c $(HDRS)
@@ -76,11 +76,11 @@ test_compose: $(CORE) test/test_compose.c $(HDRS)
 
 # FreeBSD display (DRM/KMS) and input (evdev): needs the libdrm package. UNTESTED, see docs/FREEBSD.md.
 kms: clean
-	$(MAKE) wsd test_window EXTRA_SRC="src/backend_kms.c src/evdev.c src/touchpad.c src/vt_switch.c" EXTRA_CFLAGS="-DWS_KMS `pkg-config --cflags libdrm`" EXTRA_LIBS="`pkg-config --libs libdrm`"
+	$(MAKE) WindowServer test_window EXTRA_SRC="src/backend_kms.c src/evdev.c src/touchpad.c src/vt_switch.c" EXTRA_CFLAGS="-DWS_KMS `pkg-config --cflags libdrm`" EXTRA_LIBS="`pkg-config --libs libdrm`"
 
 # FreeBSD display without a GPU driver: the vt(4) framebuffer (EFI GOP / simplefb: a QEMU window, a UEFI machine without a KMS driver). Input: evdev. No libdrm needed.
 fb: clean
-	$(MAKE) wsd test_window EXTRA_SRC="src/backend_fb.c src/evdev.c src/touchpad.c src/vt_switch.c" EXTRA_CFLAGS="-DWS_KMS -DWS_FB"
+	$(MAKE) WindowServer test_window EXTRA_SRC="src/backend_fb.c src/evdev.c src/touchpad.c src/vt_switch.c" EXTRA_CFLAGS="-DWS_KMS -DWS_FB"
 
 test_region: $(CORE) test/test_region.c $(HDRS)
 	$(CC) $(CFLAGS) -o $@ $(CORE) test/test_region.c $(LDLIBS)
@@ -99,13 +99,13 @@ test_wire: src/compositor_sw.c src/region.c src/ipc.c src/evrec.c src/buffer.c t
 
 # GPU compositor (OpenGL ES 2 on EGL/GBM, Mesa): needs the mesa-libs and libdrm packages. UNTESTED, see docs/FREEBSD.md.
 gl: clean
-	$(MAKE) wsd test_window test_interactive test_robust EXTRA_SRC=src/compositor_gl.c EXTRA_CFLAGS="-DWS_GL -DWS_GBM -DWS_EGL `pkg-config --cflags egl gbm glesv2`" EXTRA_LIBS="`pkg-config --libs egl gbm glesv2`"
+	$(MAKE) WindowServer test_window test_interactive test_robust EXTRA_SRC=src/compositor_gl.c EXTRA_CFLAGS="-DWS_GL -DWS_GBM -DWS_EGL `pkg-config --cflags egl gbm glesv2`" EXTRA_LIBS="`pkg-config --libs egl gbm glesv2`"
 
 # display, input and GPU compositor together
 full: clean
-	$(MAKE) wsd test_window EXTRA_SRC="src/backend_kms.c src/evdev.c src/touchpad.c src/vt_switch.c src/compositor_gl.c" EXTRA_CFLAGS="-DWS_KMS -DWS_GL -DWS_GBM -DWS_EGL `pkg-config --cflags libdrm egl gbm glesv2`" EXTRA_LIBS="`pkg-config --libs libdrm egl gbm glesv2`"
+	$(MAKE) WindowServer test_window EXTRA_SRC="src/backend_kms.c src/evdev.c src/touchpad.c src/vt_switch.c src/compositor_gl.c" EXTRA_CFLAGS="-DWS_KMS -DWS_GL -DWS_GBM -DWS_EGL `pkg-config --cflags libdrm egl gbm glesv2`" EXTRA_LIBS="`pkg-config --libs libdrm egl gbm glesv2`"
 
-check: test_bplist test_input test_touchpad test_fxcache test_damage test_compose test_region test_evrec test_buffer test_diff wsd test_wire test_interactive test_robust test_golden test_generic test_props test_shim test_shim2 test_shim3 test_shim4 test_shim2
+check: test_bplist test_input test_touchpad test_fxcache test_damage test_compose test_region test_evrec test_buffer test_diff WindowServer test_wire test_interactive test_robust test_golden test_generic test_props test_shim test_shim2 test_shim3 test_shim4 test_shim2
 	@if [ -d "$(COREUI)" ]; then $(MAKE) -C "$(COREUI)" check; else echo "(CoreUI not found: skipping its tests; COREUI=path of the CoreUI repository)"; fi
 	./test_input
 	./test_touchpad
@@ -134,17 +134,17 @@ check: test_bplist test_input test_touchpad test_fxcache test_damage test_compos
 PREFIX  ?= /usr/local
 DESTDIR ?=
 # install: the server, the tools, the client library and headers, the rc script, wsstart and the manual page
-install: wsd tools_all
+install: WindowServer tools_all
 	install -d $(DESTDIR)$(PREFIX)/sbin $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include/wsbsd $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/etc/rc.d $(DESTDIR)$(PREFIX)/share/man/man8
-	install -m 0755 wsd $(DESTDIR)$(PREFIX)/sbin/wsd
+	install -m 0755 WindowServer $(DESTDIR)$(PREFIX)/sbin/WindowServer
 	install -m 0755 wsspace wsshot wsshow wscarender wsclick wskey wsdrag wswins wsfps wsmove wscursor $(DESTDIR)$(PREFIX)/bin/
 	sed 's|%%PREFIX%%|$(PREFIX)|g' dist/wsstart > $(DESTDIR)$(PREFIX)/bin/wsstart && chmod 0755 $(DESTDIR)$(PREFIX)/bin/wsstart
-	sed 's|%%PREFIX%%|$(PREFIX)|g' dist/wsd.rc > $(DESTDIR)$(PREFIX)/etc/rc.d/wsd && chmod 0555 $(DESTDIR)$(PREFIX)/etc/rc.d/wsd
+	sed 's|%%PREFIX%%|$(PREFIX)|g' dist/WindowServer.rc > $(DESTDIR)$(PREFIX)/etc/rc.d/WindowServer && chmod 0555 $(DESTDIR)$(PREFIX)/etc/rc.d/WindowServer
 	install -d $(DESTDIR)$(PREFIX)/etc/xdg/fastfetch $(DESTDIR)$(PREFIX)/share/wsbsd $(DESTDIR)$(PREFIX)/etc/profile.d
 	install -m 0644 dist/fastfetch.jsonc $(DESTDIR)$(PREFIX)/etc/xdg/fastfetch/config.jsonc
 	install -m 0644 dist/neofetch.conf $(DESTDIR)$(PREFIX)/share/wsbsd/neofetch.conf
-	install -m 0644 dist/wsd.sh $(DESTDIR)$(PREFIX)/etc/profile.d/wsd.sh
-	sed 's|%%PREFIX%%|$(PREFIX)|g' man/wsd.8 > $(DESTDIR)$(PREFIX)/share/man/man8/wsd.8
+	install -m 0644 dist/WindowServer.sh $(DESTDIR)$(PREFIX)/etc/profile.d/WindowServer.sh
+	sed 's|%%PREFIX%%|$(PREFIX)|g' man/WindowServer.8 > $(DESTDIR)$(PREFIX)/share/man/man8/WindowServer.8
 	install -m 0644 include/ws.h include/ws_client.h include/ws_buffer.h include/ws_evrec.h include/ws_region.h include/ws_ipc.h $(SKYLIGHT)/include/sls_wire.h $(SKYLIGHT)/include/sls_msgids.h include/mach_compat.h $(SKYLIGHT)/include/SkyLight.h $(DESTDIR)$(PREFIX)/include/wsbsd/
 	install -m 0644 libwsclient.a $(DESTDIR)$(PREFIX)/lib/libwsclient.a
 
@@ -185,9 +185,9 @@ wscursor: tools/wscursor.c libwsclient.a
 	$(CC) $(CFLAGS) -o $@ tools/wscursor.c libwsclient.a $(LDLIBS)
 tools_all: wsspace wsshot wsshow wscarender wsclick wskey wsdrag wswins wsfps wsmove wscursor
 
-# start wsd, draw the test window through the protocol, save window.ppm (window.png on macOS), stop wsd
-demo: wsd test_window
+# start WindowServer, draw the test window through the protocol, save window.ppm (window.png on macOS), stop WindowServer
+demo: WindowServer test_window
 	OUT="$(OUT)" sh test/run_demo.sh
 
 clean:
-	rm -rf stage wsbsd-*.tar.gz; rm -f test_input test_touchpad test_fxcache libwsclient.a src/*.client.o wsshot wsshow wsclick wskey wsdrag test_generic wsd test_window test_interactive test_robust test_golden test_props test_shim test_compose test_region test_wire test_evrec test_buffer test_diff test_bplist out.ppm window.ppm window.png
+	rm -rf stage wsbsd-*.tar.gz; rm -f test_input test_touchpad test_fxcache libwsclient.a src/*.client.o wsshot wsshow wsclick wskey wsdrag test_generic WindowServer test_window test_interactive test_robust test_golden test_props test_shim test_compose test_region test_wire test_evrec test_buffer test_diff test_bplist out.ppm window.ppm window.png

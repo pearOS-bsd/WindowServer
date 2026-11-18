@@ -5,9 +5,9 @@ cd "$(dirname "$0")/.."
 SOCK="${TMPDIR:-/tmp}/wsd-vnc.$$.sock"
 P=$((20000 + $$ % 20000))
 export WS_SOCKET="$SOCK"
-./wsd -t -g 400x300 -V $P > /dev/null 2>&1 &
+./WindowServer -t -g 400x300 -V $P > /dev/null 2>&1 &
 W1=$!
-WSD_VNC_PASSWORD=secret ./wsd -t -g 400x300 -V $((P + 1)) -s "$SOCK.2" > /dev/null 2>&1 &
+WSD_VNC_PASSWORD=secret ./WindowServer -t -g 400x300 -V $((P + 1)) -s "$SOCK.2" > /dev/null 2>&1 &
 W2=$!
 trap 'kill $W1 $W2 2>/dev/null || true; rm -f "$SOCK" "$SOCK.2"' EXIT
 sleep 1

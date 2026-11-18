@@ -1,4 +1,4 @@
-/* wswins: lists the windows of a running wsd (id, owner, level, alpha, bounds), front to back; wswins ID out.ppm also saves what the compositor holds for one window. */
+/* wswins: lists the windows of a running WindowServer (id, owner, level, alpha, bounds), front to back; wswins ID out.ppm also saves what the compositor holds for one window. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

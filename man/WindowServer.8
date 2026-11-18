@@ -2,7 +2,7 @@
 .Dt WSD 8
 .Os
 .Sh NAME
-.Nm wsd
+.Nm WindowServer
 .Nd window server and compositor speaking the SkyLight WindowServer protocol
 .Sh SYNOPSIS
 .Nm
@@ -40,7 +40,7 @@ Screen size of the headless backend (default 1280x800).
 .It Fl s Ar socket
 Socket path.
 Default:
-.Ev XDG_RUNTIME_DIR Ns /wsd.sock ,
+.Ev XDG_RUNTIME_DIR Ns /WindowServer.sock ,
 else
 .Pa /tmp/wsd- Ns Ar uid Ns Pa .sock .
 .It Fl S
@@ -60,8 +60,8 @@ when
 is not given.
 .El
 .Sh FILES
-.Bl -tag -width "%%PREFIX%%/etc/rc.d/wsd"
-.It Pa %%PREFIX%%/etc/rc.d/wsd
+.Bl -tag -width "%%PREFIX%%/etc/rc.d/WindowServer"
+.It Pa %%PREFIX%%/etc/rc.d/WindowServer
 rc(8) script, see its header for the rc.conf variables.
 .It Pa %%PREFIX%%/bin/wsstart
 Starts a private server for the current user and runs a client on it.

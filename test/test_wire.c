@@ -1,4 +1,4 @@
-/* Protocol conformance against a running wsd: raw SkyLight-layout messages, error codes and rights as recovered
+/* Protocol conformance against a running WindowServer: raw SkyLight-layout messages, error codes and rights as recovered
  * from the decompiled server routines (docs/SPEC-SLS-WIRE.md). Run through test/run_wire.sh. */
 #include "ws_ipc.h"
 #include "ws_region.h"
@@ -72,7 +72,7 @@ int main(void)
 {
 	const char *path = getenv("WS_SOCKET");
 	int a = ws_ipc_connect(path), b = ws_ipc_connect(path);
-	if (a < 0 || b < 0) { printf("cannot connect to wsd\n"); return 1; }
+	if (a < 0 || b < 0) { printf("cannot connect to WindowServer\n"); return 1; }
 
 	/* NewConnectionPort (32000): handshake layout, errors, event channel, PID/version */
 	int cfd = ws_ipc_connect(path);

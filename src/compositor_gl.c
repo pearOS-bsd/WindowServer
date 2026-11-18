@@ -218,7 +218,7 @@ static GLuint compile(GLenum type, const char *src)
 	if (!ok) {
 		char log[512]; GLsizei n = 0;
 		glGetShaderInfoLog(s, sizeof log - 1, &n, log); log[n] = 0;
-		fprintf(stderr, "wsd: shader compile failed: %s\n", log);
+		fprintf(stderr, "WindowServer: shader compile failed: %s\n", log);
 		glDeleteShader(s);
 		return 0;
 	}
@@ -239,7 +239,7 @@ static int build_program(gl_compositor *c)
 	if (!ok) {
 		char log[512]; GLsizei n = 0;
 		glGetProgramInfoLog(c->prog, sizeof log - 1, &n, log); log[n] = 0;
-		fprintf(stderr, "wsd: shader link failed: %s\n", log);
+		fprintf(stderr, "WindowServer: shader link failed: %s\n", log);
 		glDeleteProgram(c->prog); c->prog = 0;
 		return -1;
 	}
@@ -280,13 +280,13 @@ static int build_program(gl_compositor *c)
 			glBindAttribLocation(c->glass_prog, 0, "a_pos");
 			glLinkProgram(c->glass_prog);
 			GLint lk = 0; glGetProgramiv(c->glass_prog, GL_LINK_STATUS, &lk);
-			if (!lk) { char log[512]; GLsizei n = 0; glGetProgramInfoLog(c->glass_prog, sizeof log - 1, &n, log); log[n] = 0; fprintf(stderr, "wsd: glass shader link failed: %s\n", log); glDeleteProgram(c->glass_prog); c->glass_prog = 0; }
+			if (!lk) { char log[512]; GLsizei n = 0; glGetProgramInfoLog(c->glass_prog, sizeof log - 1, &n, log); log[n] = 0; fprintf(stderr, "WindowServer: glass shader link failed: %s\n", log); glDeleteProgram(c->glass_prog); c->glass_prog = 0; }
 			else {
 				GLuint g = c->glass_prog;
 				c->gu_rect = glGetUniformLocation(g, "u_rect"); c->gu_screen = glGetUniformLocation(g, "u_screen"); c->gu_scene = glGetUniformLocation(g, "u_scene"); c->gu_blur = glGetUniformLocation(g, "u_blur");
 				c->gu_n = glGetUniformLocation(g, "u_n"); c->gu_grect = glGetUniformLocation(g, "u_grect"); c->gu_grm = glGetUniformLocation(g, "u_grm"); c->gu_L = glGetUniformLocation(g, "u_L"); c->gu_amp = glGetUniformLocation(g, "u_amp");
 			}
-		} else if (gfs == 0) fprintf(stderr, "wsd: glass shader did not compile\n");
+		} else if (gfs == 0) fprintf(stderr, "WindowServer: glass shader did not compile\n");
 		if (gvs) glDeleteShader(gvs);
 		if (gfs) glDeleteShader(gfs);
 	}
@@ -361,7 +361,7 @@ static void make_target(gl_compositor *c)
 	glBindFramebuffer(GL_FRAMEBUFFER, c->fbo);
 }
 
-#define GLFAIL(msg) do { fprintf(stderr, "wsd: GL init: %s (EGL error 0x%x)\n", msg, (unsigned)eglGetError()); goto fail; } while (0)
+#define GLFAIL(msg) do { fprintf(stderr, "WindowServer: GL init: %s (EGL error 0x%x)\n", msg, (unsigned)eglGetError()); goto fail; } while (0)
 
 gl_compositor *glc_create(const char *node, int width, int height)
 {
@@ -371,7 +371,7 @@ gl_compositor *glc_create(const char *node, int width, int height)
 	c->w = width; c->h = height; c->dpy = EGL_NO_DISPLAY; c->ctx = EGL_NO_CONTEXT; c->pbuf = EGL_NO_SURFACE;
 	c->dpy = pick_display(c, node);
 #ifdef WS_GBM
-	if (node && !c->gbm) fprintf(stderr, "wsd: GL init: gbm_create_device on %s failed, trying surfaceless / default display\n", node);
+	if (node && !c->gbm) fprintf(stderr, "WindowServer: GL init: gbm_create_device on %s failed, trying surfaceless / default display\n", node);
 #endif
 	EGLint major = 0, minor = 0;
 	if (c->dpy == EGL_NO_DISPLAY) GLFAIL("no EGL display (GBM device on the render node, surfaceless and default all failed)");
@@ -411,7 +411,7 @@ gl_compositor *glc_create(const char *node, int width, int height)
 	glBindBuffer(GL_ARRAY_BUFFER, c->vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STATIC_DRAW);
 	make_target(c);
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { fprintf(stderr, "wsd: render target incomplete\n"); goto fail; }
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { fprintf(stderr, "WindowServer: render target incomplete\n"); goto fail; }
 
 	snprintf(c->desc, sizeof c->desc, "EGL %d.%d, %s, dma-buf import %s, export %s, %s",
 	         (int)major, (int)minor, (const char *)glGetString(GL_RENDERER), c->have_import ? "yes" : "no (upload path)", c->have_export ? "yes" : "no (read-back)",

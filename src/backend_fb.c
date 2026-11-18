@@ -1,5 +1,5 @@
 /* FreeBSD display through the vt(4) framebuffer, the way the machine's console already draws (EFI GOP on arm64 and amd64 UEFI, simplefb, vesa): no DRM driver needed, so it works in a
- * QEMU window (ramfb / virtio-gpu GOP) and on a UEFI machine without a KMS driver. It offers the interface of the KMS backend (ws_backend.h) so that wsd drives it the same way:
+ * QEMU window (ramfb / virtio-gpu GOP) and on a UEFI machine without a KMS driver. It offers the interface of the KMS backend (ws_backend.h) so that WindowServer drives it the same way:
  *   - ioctl FBIOGTYPE / FBIO_GETLINEWIDTH on the console device give the geometry, mmap of the same device maps the framebuffer (vt_fb);
  *   - the compositor draws into an ordinary surface and a present copies it to the framebuffer (premultiplied BGRA, the order of the EFI GOP BGR format and of simplefb a8r8g8b8);
  *   - no hardware cursor plane: the cursor is composed in software, a present is made when it moves. */
@@ -32,21 +32,21 @@ ws_kms *ws_kms_open(const char *dev, int *w, int *h)
 	if (!k) return NULL;
 	if (!dev || !strncmp(dev, "/dev/dri", 8)) dev = "/dev/ttyv0";         /* the default card name belongs to the DRM backend */
 	k->fd = open(dev, O_RDWR | O_CLOEXEC);
-	if (k->fd < 0) { perror("wsd: framebuffer open"); free(k); return NULL; }
+	if (k->fd < 0) { perror("WindowServer: framebuffer open"); free(k); return NULL; }
 	struct fbtype ft; int line = 0;
-	if (ioctl(k->fd, FBIOGTYPE, &ft) < 0 || ft.fb_width <= 0 || ft.fb_height <= 0) { perror("wsd: FBIOGTYPE"); close(k->fd); free(k); return NULL; }
+	if (ioctl(k->fd, FBIOGTYPE, &ft) < 0 || ft.fb_width <= 0 || ft.fb_height <= 0) { perror("WindowServer: FBIOGTYPE"); close(k->fd); free(k); return NULL; }
 	if (ioctl(k->fd, FBIO_GETLINEWIDTH, &line) < 0 || line <= 0) line = ft.fb_width * (ft.fb_depth / 8);
-	if (ft.fb_depth != 32 && ft.fb_depth != 24) { fprintf(stderr, "wsd: framebuffer depth %d is not supported (32 bits per pixel only)\n", ft.fb_depth); close(k->fd); free(k); return NULL; }
+	if (ft.fb_depth != 32 && ft.fb_depth != 24) { fprintf(stderr, "WindowServer: framebuffer depth %d is not supported (32 bits per pixel only)\n", ft.fb_depth); close(k->fd); free(k); return NULL; }
 	k->w = ft.fb_width; k->h = ft.fb_height; k->stride = line; k->map_size = (size_t)line * (size_t)ft.fb_height;
 	k->map = mmap(NULL, k->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, k->fd, 0);
-	if (k->map == MAP_FAILED) { perror("wsd: framebuffer mmap"); close(k->fd); free(k); return NULL; }
+	if (k->map == MAP_FAILED) { perror("WindowServer: framebuffer mmap"); close(k->fd); free(k); return NULL; }
 	k->back = ws_surface_new(k->w, k->h);
 	int p[2];
 	if (!k->back || pipe(p) < 0) { munmap(k->map, k->map_size); close(k->fd); free(k); return NULL; }
 	k->pipe_r = p[0]; k->pipe_w = p[1];
 	if (w) *w = k->w;
 	if (h) *h = k->h;
-	fprintf(stderr, "wsd: framebuffer %s %dx%d, %d bits, %d bytes per row\n", dev, k->w, k->h, ft.fb_depth, line);
+	fprintf(stderr, "WindowServer: framebuffer %s %dx%d, %d bits, %d bytes per row\n", dev, k->w, k->h, ft.fb_depth, line);
 	return k;
 #else
 	(void)dev; (void)w; (void)h;

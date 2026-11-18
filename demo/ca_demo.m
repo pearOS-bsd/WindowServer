@@ -1,6 +1,6 @@
-/* Core Animation (GNUstep QuartzCore: CALayer tree, implicit and explicit animations) over wsd.
+/* Core Animation (GNUstep QuartzCore: CALayer tree, implicit and explicit animations) over WindowServer.
  * GNUstep's CARenderer needs OpenGL; this demo uses a small software renderer instead: every frame it refreshes the presentation layers the way CARenderer does
- * (discard, then applyAnimationsAtTime:), walks them, and draws with CoreGraphics (Opal) into the window's shared buffer, which is then flushed to wsd. */
+ * (discard, then applyAnimationsAtTime:), walks them, and draws with CoreGraphics (Opal) into the window's shared buffer, which is then flushed to WindowServer. */
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
@@ -59,7 +59,7 @@ int main(int argc, char **argv)
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 	const char *out = argc > 1 ? argv[1] : "ca";
 	ws_conn *c = ws_connect(NULL);
-	if (!c) { fprintf(stderr, "ca_demo: cannot connect to wsd\n"); return 1; }
+	if (!c) { fprintf(stderr, "ca_demo: cannot connect to WindowServer\n"); return 1; }
 	enum { W = 520, H = 360 };
 	ws_win w; ws_cbuf cb; uint32_t sid;
 	if (ws_win_create(c, (ws_rect){ 100, 100, W, H }, 0, &w) || ws_cbuf_create(c, W, H, &cb) || ws_surface_add(c, &w, &sid) || ws_surface_bind_buffer(c, &w, sid, &cb)) { fprintf(stderr, "ca_demo: window setup failed\n"); return 1; }
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
 		CGContextRef e = CGBitmapContextCreate(px->px, W, H, 8, px->stride, rgb, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
 		CGContextSetRGBFillColor(e, 0, 0.5, 1, 1); CGContextFillRect(e, CGRectMake(0, 0, 100, 100)); CGContextFlush(e); CGContextRelease(e);
 		long nz = 0; for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) if (((uint32_t *)(px->px + y * px->stride))[x]) nz++;
-		printf("early test: %ld non-zero pixels in the wsd buffer (before any CALayer)\n", nz);
+		printf("early test: %ld non-zero pixels in the WindowServer buffer (before any CALayer)\n", nz);
 	}
 	/* the layer tree */
 	CALayer *root = [CALayer layer];
@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 	[box addAnimation: fade forKey: @"fade"];
 	[CATransaction flush];
 
-	/* Opal assumes rows are width*4 bytes apart, the wsd buffer's stride is padded (2176 for 520): draw into a tight buffer and copy the rows */
+	/* Opal assumes rows are width*4 bytes apart, the WindowServer buffer's stride is padded (2176 for 520): draw into a tight buffer and copy the rows */
 	size_t tstride = (size_t)W * 4; uint8_t *tmp = calloc(tstride, H);
 	int shots = 0;
 	for (int frame = 0; frame < 40; frame++) {
@@ -116,7 +116,7 @@ int main(int argc, char **argv)
 		memset(tmp, 0, tstride * H);                               /* clear the buffer by hand: Opal's CGContextClearRect leaves the Cairo operator on CLEAR */
 		CGContextRef g = CGBitmapContextCreate(tmp, W, H, 8, tstride, rgb, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
 		if (!g) { fprintf(stderr, "ca_demo: CGBitmapContextCreate failed\n"); return 1; }
-		if (frame == 0) {                                              /* does Opal draw at all in this binary: a private buffer, no wsd involved */
+		if (frame == 0) {                                              /* does Opal draw at all in this binary: a private buffer, no WindowServer involved */
 			uint32_t *own = calloc(64 * 64, 4);
 			CGContextRef og = CGBitmapContextCreate(own, 64, 64, 8, 256, rgb, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
 			CGContextSetRGBFillColor(og, 1, 0, 0, 1); CGContextFillRect(og, CGRectMake(0, 0, 64, 64)); CGContextFlush(og);

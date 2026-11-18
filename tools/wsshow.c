@@ -32,7 +32,7 @@ int main(int argc, char **argv)
 
 	if (argc < 2) { fprintf(stderr, "usage: wsshow file.ppm [x y [level]]\n"); return 1; }
 	if ((d = load(argv[1], &w, &h)) == NULL) { fprintf(stderr, "wsshow: cannot read %s\n", argv[1]); return 1; }
-	if ((c = ws_connect(NULL)) == NULL) { fprintf(stderr, "wsshow: cannot connect to wsd\n"); return 1; }
+	if ((c = ws_connect(NULL)) == NULL) { fprintf(stderr, "wsshow: cannot connect to WindowServer\n"); return 1; }
 	if (ws_win_create(c, (ws_rect){ x, y, w, h }, level, &win)) { fprintf(stderr, "wsshow: cannot create the window\n"); return 1; }
 	ws_win_order(c, &win, WS_ABOVE, 0);
 	for (;;) {

@@ -1,4 +1,4 @@
-/* wsshot: asks the running wsd for a screenshot (PPM) */
+/* wsshot: asks the running WindowServer for a screenshot (PPM) */
 #include <stdio.h>
 #include "ws_client.h"
 int main(int argc, char **argv)

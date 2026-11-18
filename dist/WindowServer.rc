@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# PROVIDE: wsd
+# PROVIDE: WindowServer
 # REQUIRE: LOGIN FILESYSTEMS
 # KEYWORD: shutdown
 #
@@ -8,22 +8,22 @@
 #   wsd_enable="YES"
 #   wsd_user="alice"                         # the user whose session this is (default: root)
 #   wsd_flags="-b kms -r gl -S"              # backend (headless | kms), renderer (sw | gl), -S = Capsicum sandbox
-#   wsd_socket_dir="/var/run/wsd"            # the socket is <dir>/wsd.sock, readable by wsd_user only
+#   wsd_socket_dir="/var/run/WindowServer"            # the socket is <dir>/WindowServer.sock, readable by wsd_user only
 
 . /etc/rc.subr
 
-name="wsd"
+name="WindowServer"
 rcvar="wsd_enable"
 load_rc_config $name
 
 : ${wsd_enable:="NO"}
 : ${wsd_user:="root"}
 : ${wsd_flags:="-b kms -r gl -S"}
-: ${wsd_socket_dir:="/var/run/wsd"}
+: ${wsd_socket_dir:="/var/run/WindowServer"}
 
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
-command_args="-f -P ${pidfile} -u ${wsd_user} env XDG_RUNTIME_DIR=${wsd_socket_dir} %%PREFIX%%/sbin/wsd ${wsd_flags}"
+command_args="-f -P ${pidfile} -u ${wsd_user} env XDG_RUNTIME_DIR=${wsd_socket_dir} %%PREFIX%%/sbin/WindowServer ${wsd_flags}"
 start_precmd="wsd_prestart"
 
 wsd_prestart()

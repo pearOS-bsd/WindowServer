@@ -21,7 +21,7 @@
 #define CMSG_DATA(c) ((unsigned char *)(c) + WS_A8(sizeof(struct cmsghdr)))
 #define CMSG_NXTHDR(m, c) ((char *)(c) + WS_A8((c)->cmsg_len) + WS_A8(sizeof(struct cmsghdr)) > (char *)(m)->msg_control + (m)->msg_controllen ? (struct cmsghdr *)0 : (struct cmsghdr *)((char *)(c) + WS_A8((c)->cmsg_len)))
 #endif
-#if defined(__APPLE__) && !defined(WS_DARWIN_ON_BSD)		/* WS_DARWIN_ON_BSD: a Mach-O program that runs on the FreeBSD kernel (darwinator) talks to wsd with the same sequenced packets as a native client */
+#if defined(__APPLE__) && !defined(WS_DARWIN_ON_BSD)		/* WS_DARWIN_ON_BSD: a Mach-O program that runs on the FreeBSD kernel (darwinator) talks to WindowServer with the same sequenced packets as a native client */
 #define WS_STREAM 1
 #define WS_SOCKTYPE SOCK_STREAM
 #else
@@ -146,12 +146,12 @@ ssize_t ws_ipc_recv(int sock, void *buf, size_t cap, int *fds, int *nfds)
 
 int ws_ipc_socketpair(int sv[2]) { return socketpair(AF_UNIX, WS_SOCKTYPE, 0, sv); }
 
-/* The default socket: $XDG_RUNTIME_DIR/wsd.sock when the session has a private runtime directory, else /tmp/wsd-<uid>.sock (never one name shared by every user). */
+/* The default socket: $XDG_RUNTIME_DIR/WindowServer.sock when the session has a private runtime directory, else /tmp/wsd-<uid>.sock (never one name shared by every user). */
 const char *ws_default_socket_path(void)
 {
 	static char path[200];
 	const char *rt = getenv("XDG_RUNTIME_DIR");
-	if (rt && *rt && strlen(rt) < 150) snprintf(path, sizeof path, "%s/wsd.sock", rt);
+	if (rt && *rt && strlen(rt) < 150) snprintf(path, sizeof path, "%s/WindowServer.sock", rt);
 	else snprintf(path, sizeof path, "/tmp/wsd-%u.sock", (unsigned)geteuid());
 	return path;
 }

@@ -1,6 +1,6 @@
 # wsbsd status (2026-10-17)
 
-What it is: `wsd`, a window server and compositor for FreeBSD that speaks the macOS WindowServer (SkyLight) wire protocol, plus a client library, test suites and the packaging around it.
+What it is: `WindowServer`, a window server and compositor for FreeBSD that speaks the macOS WindowServer (SkyLight) wire protocol, plus a client library, test suites and the packaging around it.
 
 ## Numbers (approximate, from the repository)
 - SkyLight server routines known from the macOS 27 decompile: 728. With a dedicated handler holding real state: about 265 (36%; the recorded replies cover most of the rest correctly). Answered from replies recorded on a real macOS 26 WindowServer: ~280.
@@ -16,7 +16,7 @@ software and GL compositors with shadows, rounded corners, alpha and background 
 Real applications on it: GNUstep AppKit programs (Sudoku, Gorm, the Terminal in `../terminal`), through the GNUstep back-end in `appkit/back-wsd`.
 
 Hardening: Capsicum sandbox (`-S`), per-connection limits, peer credential check, 0600 socket, VT switching with input discarded on other consoles.
-Product: `make install` / `make package`, rc.d script, `wsstart`, `wsd(8)`.
+Product: `make install` / `make package`, rc.d script, `wsstart`, `WindowServer(8)`.
 
 ## Not done
 - Routines needing more of the system: menu bar, display wall / HMD, selective sharing, capture streams, session management beyond the single session.
@@ -30,8 +30,8 @@ Product: `make install` / `make package`, rc.d script, `wsstart`, `wsd(8)`.
 `gmake && gmake check` (FreeBSD or macOS), CI in `.github/workflows/wsbsd.yml`, recordings in `docs/golden/`, scenarios in `lab/`.
 
 ## Core Animation over Opal (FreeBSD)
-GNUstep QuartzCore (CALayer tree, implicit and explicit animations) renders into a wsd window through Opal (`demo/ca_demo.m`, CI job freebsd-quartzcore, screenshots ca-a/ca-b).
-Pitfall found: Opal's CGBitmapContext assumes rows `width*4` bytes apart and ignores a padded bytesPerRow, while wsd buffers are padded to 128 bytes; draw into a tight buffer and copy the rows (the GNUstep back-end uses Cairo with the real stride and is not affected).
+GNUstep QuartzCore (CALayer tree, implicit and explicit animations) renders into a WindowServer window through Opal (`demo/ca_demo.m`, CI job freebsd-quartzcore, screenshots ca-a/ca-b).
+Pitfall found: Opal's CGBitmapContext assumes rows `width*4` bytes apart and ignores a padded bytesPerRow, while WindowServer buffers are padded to 128 bytes; draw into a tight buffer and copy the rows (the GNUstep back-end uses Cairo with the real stride and is not affected).
 
 ## Keyboard layouts (xkbcommon)
 `src/xkbmap.c` + `include/ws_xkb.h` translate macOS key codes and CGEventFlags to text through xkbcommon (`WSD_XKB_LAYOUT`, `WSD_XKB_VARIANT`, `WSD_XKB_OPTIONS`; Option acts as AltGr). The AppKit backend uses it when built with `-DWSD_XKB` (CI does), falling back to the US table. `test_xkb` runs in `make check` when xkbcommon is installed.

@@ -19,7 +19,7 @@ typedef struct {
 } ws_surface;
 
 ws_surface *ws_surface_new(int w, int h);
-/* Shared-memory surface (the IOSurface stand-in). name like "/wsd.123.4"; create=1 makes it. */
+/* Shared-memory surface (the IOSurface stand-in). name like "/WindowServer.123.4"; create=1 makes it. */
 ws_surface *ws_surface_shm(const char *name, int w, int h, int create);
 void ws_shm_unlink(const char *name);
 /* Anonymous shared surface: returns the mapped surface and a descriptor to pass to another process. */

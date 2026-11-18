@@ -1,4 +1,4 @@
-/* Client library: what an application links to talk to wsd (the SLS/CGS client side). */
+/* Client library: what an application links to talk to WindowServer (the SLS/CGS client side). */
 #ifndef WS_CLIENT_H
 #define WS_CLIENT_H
 #include "ws.h"

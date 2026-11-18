@@ -1,4 +1,4 @@
-/* wsdrag x1 y1 x2 y2 [hold_ms]: presses the left button at (x1,y1), moves to (x2,y2) in steps and releases (through the wsd test injection) */
+/* wsdrag x1 y1 x2 y2 [hold_ms]: presses the left button at (x1,y1), moves to (x2,y2) in steps and releases (through the WindowServer test injection) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

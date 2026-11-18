@@ -126,7 +126,7 @@ static void shake_feed(int dx)
 {
 	double now = mono_now(); if (now - sh_t > 0.25) { sh_travel = 0; sh_dir = 0; } sh_t = now;
 	int d = dx > 0 ? 1 : dx < 0 ? -1 : 0; if (!d) return;
-	if (sh_dir && d != sh_dir) { if (sh_travel >= 30) { if (sh_nflip == 12) { memmove(sh_flip, sh_flip + 1, 11 * sizeof sh_flip[0]); sh_nflip--; } sh_flip[sh_nflip++] = now; if (getenv("WSD_SHAKE_DEBUG")) fprintf(stderr, "wsd: shake flip %d\n", sh_nflip); } sh_travel = 0; }
+	if (sh_dir && d != sh_dir) { if (sh_travel >= 30) { if (sh_nflip == 12) { memmove(sh_flip, sh_flip + 1, 11 * sizeof sh_flip[0]); sh_nflip--; } sh_flip[sh_nflip++] = now; if (getenv("WSD_SHAKE_DEBUG")) fprintf(stderr, "WindowServer: shake flip %d\n", sh_nflip); } sh_travel = 0; }
 	sh_dir = d; sh_travel += (float)abs(dx);
 }
 int ws_server_cursor_animating(void) { return sh_scale > 1.0f || sh_nflip > 0; }       /* the main loop wakes up every frame while the pointer is big or being shaken */
@@ -136,7 +136,7 @@ static float shake_factor(void)       /* the factor now (also moves it towards i
 	float target = n >= 3 ? 1.0f + 0.6f * (float)(n - 2) : 1.0f; if (target > 4.0f) target = 4.0f;
 	double dt = sh_scale_t ? now - sh_scale_t : 0.016; if (dt > 0.1) dt = 0.1; sh_scale_t = now;
 	if (target > sh_scale) { sh_scale += 9.0f * (float)dt; if (sh_scale > target) sh_scale = target; } else { sh_scale -= 2.2f * (float)dt; if (sh_scale < target) sh_scale = target; }
-	if (getenv("WSD_SHAKE_DEBUG")) { static int c; if (c++ % 10 == 0) fprintf(stderr, "wsd: shake n=%d target=%.2f scale=%.2f\n", n, target, sh_scale); }
+	if (getenv("WSD_SHAKE_DEBUG")) { static int c; if (c++ % 10 == 0) fprintf(stderr, "WindowServer: shake n=%d target=%.2f scale=%.2f\n", n, target, sh_scale); }
 	if (sh_scale <= 1.0f) { sh_scale = 1.0f; sh_scale_t = 0; }
 	return sh_scale;
 }
@@ -176,7 +176,7 @@ ws_wid ws_create_window(ws_server *s, ws_rect f)
 
 ws_wid ws_create_window_shm(ws_server *s, ws_rect f, char name[32])
 {
-	snprintf(name, 32, "/wsd.%d.%u", (int)getpid(), (unsigned)s->next_id);
+	snprintf(name, 32, "/WindowServer.%d.%u", (int)getpid(), (unsigned)s->next_id);
 	ws_surface *b = ws_surface_shm(name, f.w, f.h, 1);
 	if (!b) return 0;
 	ws_wid id = add_window(s, f, b, name);
@@ -762,7 +762,7 @@ static uint32_t g_key_requester;
 static void set_key_window(ws_server *s, ws_wid id)
 {
 	if (s->key_win == id) return;
-	if (getenv("WSD_DEBUG")) fprintf(stderr, "wsd: key window %u -> %u\n", (unsigned)s->key_win, (unsigned)id);
+	if (getenv("WSD_DEBUG")) fprintf(stderr, "WindowServer: key window %u -> %u\n", (unsigned)s->key_win, (unsigned)id);
 	window *o = get(s, s->key_win), *n = get(s, id);
 	/* a key change that the owner asked for is not echoed to it (g_key_requester): it knows its windows, and the echoes arriving late made an application with two or three windows pass the key around forever (every echo made a window key, which asked again) */
 	if (o && !(g_key_requester && o->owner == g_key_requester)) post(o, WS_EV_FOCUS_OUT, 0, 0, 0, 0);

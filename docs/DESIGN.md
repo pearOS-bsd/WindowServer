@@ -29,7 +29,7 @@ The server model never changes between backends.
 
 ## Status
 Working end to end (`make demo`, runs on macOS and is portable to FreeBSD: kqueue, unix sockets, POSIX shm):
-- `wsd`: window server daemon (kqueue loop, unix socket IPC, shared-memory backing stores, headless PPM output).
+- `WindowServer`: window server daemon (kqueue loop, unix socket IPC, shared-memory backing stores, headless PPM output).
 - Protocol (`include/ws_proto.h`): connect, create/order/move/release window, alpha, level, shadow, flush,
   find window, screenshot. Names follow SkyLight routines. Client library: `include/ws_client.h`.
 - Software compositor: premultiplied source-over, fill, copy, window opacity, levels and ordering.
@@ -45,7 +45,7 @@ with occlusion culling, per-layer colour-conversion LUTs, layers below opacity 0
 
 - Input and cursor: pointer position, click-to-raise and focus, grab while a button is held, per-window event queues,
   key events to the focused window, software arrow cursor; protocol ops for injection and polling.
-- FreeBSD backend `src/backend_kms.c` (DRM/KMS dumb buffers with page flips, evdev input), wired into `wsd -b kms`.
+- FreeBSD backend `src/backend_kms.c` (DRM/KMS dumb buffers with page flips, evdev input), wired into `WindowServer -b kms`.
   UNTESTED: only syntax-checked against stub headers. See docs/FREEBSD.md.
 
 Not done: running and fixing the KMS/evdev backend on real FreeBSD, GPU (`gl`) compositor, tile-based occlusion culling,
@@ -92,7 +92,7 @@ Done, from decompilation and black-box probes (details and evidence tags in docs
 - Region serialisation, checked against 12 vectors from the live system (`test/test_region.c`).
 - Transport: SOCK_SEQPACKET + SCM_RIGHTS on FreeBSD (stream framing on macOS for tests), zero-allocation receive path.
 - Event records: parser and builders verified byte-for-byte against events serialised by the live system.
-- `make check` includes wire conformance tests (`test/test_wire.c`) that talk raw messages to a running wsd.
+- `make check` includes wire conformance tests (`test/test_wire.c`) that talk raw messages to a running WindowServer.
 Asynchronous input: events for a window are pushed to its owner over the event channel returned by the handshake.
 Not done: ~700 other routines, the window property plists (shadow), CA remote contexts (how real macOS windows get pixels),
 shared-window-state memory, event shared memory, bootstrap/connection handshake. Pixel backing, flush, screenshot, input injection

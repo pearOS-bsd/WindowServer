@@ -1,4 +1,4 @@
-/* Internals of wsd shared with the protocol families (src/sls_*.c). */
+/* Internals of WindowServer shared with the protocol families (src/sls_*.c). */
 #ifndef WSD_PRIV_H
 #define WSD_PRIV_H
 #include "ws.h"

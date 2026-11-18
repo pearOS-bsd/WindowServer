@@ -1,4 +1,4 @@
-/* wsmove x y [x y ...]: moves the pointer (no button) to each point in turn (through the wsd test injection) */
+/* wsmove x y [x y ...]: moves the pointer (no button) to each point in turn (through the WindowServer test injection) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

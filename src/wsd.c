@@ -1,4 +1,4 @@
-/* wsd: the window server daemon. kqueue loop, SOCK_SEQPACKET + SCM_RIGHTS transport carrying SkyLight-layout MIG messages,
+/* WindowServer: the window server daemon. kqueue loop, SOCK_SEQPACKET + SCM_RIGHTS transport carrying SkyLight-layout MIG messages,
  * shared-memory backing stores, software compositor. Display backend: headless (PPM) or FreeBSD KMS (untested).
  * Protocol facts: docs/SPEC-SLS-WIRE.md. */
 #ifdef __FreeBSD__
@@ -91,7 +91,7 @@ static void render_frame(ws_surface *dst, int with_cursor)
 #ifdef WS_GL
 	if (glc) {
 		if (compositor_render_frame(glc, srv) == 0 && glc_read_pixels(glc, dst) == 0) { gl_failures = 0; done = 1; ws_server_force_full(srv); }
-		else if (++gl_failures >= 3) { fprintf(stderr, "wsd: GL compositor keeps failing, falling back to software\n"); glc_destroy(glc); glc = NULL; }
+		else if (++gl_failures >= 3) { fprintf(stderr, "WindowServer: GL compositor keeps failing, falling back to software\n"); glc_destroy(glc); glc = NULL; }
 	}
 #endif
 	if (!done) ws_compose_scene(srv, dst);
@@ -272,7 +272,7 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e)
 	(void)ctx;
 	tap_deliver(e);
 	conn *c = conn_by_id(owner);
-	if (getenv("WSD_TRACE")) fprintf(stderr, "wsd: event %d for window %u -> owner %u (%s)\n", e->type, (unsigned)e->wid, owner, c ? (c->efd >= 0 ? "pushed" : "no event channel") : "no connection");
+	if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer: event %d for window %u -> owner %u (%s)\n", e->type, (unsigned)e->wid, owner, c ? (c->efd >= 0 ? "pushed" : "no event channel") : "no connection");
 	if (!c || c->efd < 0) return;
 	if (c->mach && getenv("WSD_MAC_DG")) {		/* the SkyLight of the Mac takes the events as serialized CGEvents from the datagram stream (woken by a message on its notification port) */
 		int cg; uint8_t rec[512]; size_t n = 0; ws_rect f = { 0, 0, 0, 0 }; ws_window_frame(srv, e->wid, &f);
@@ -285,14 +285,14 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e)
 		case WS_EV_KEY_UP: cg = 11; n = ws_evrec_make_key(rec, sizeof rec, 0, e->key, e->flags, gx, gy, 0, 0, 0x0a); break;
 		default: break;
 		}
-		if (n) { wsd_datagram_push(c, 0, rec, (uint32_t)n); if (getenv("WSD_TRACE")) fprintf(stderr, "wsd:   datagram (kind 0) with a CGEvent record of %zu bytes for the Mac client\n", n); }
+		if (n) { wsd_datagram_push(c, 0, rec, (uint32_t)n); if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer:   datagram (kind 0) with a CGEvent record of %zu bytes for the Mac client\n", n); }
 		return;
 	}
 	wsx_event_msg m; memset(&m, 0, sizeof m);
 	m.h.msgh_bits = MACH_MSG_TYPE_MOVE_SEND_ONCE; m.h.msgh_size = sizeof m; m.h.msgh_id = WSX_EVENT_PUSH;
 	m.ndr = WS_NDR; m.type = e->type; m.wid = e->wid; m.x = e->x; m.y = e->y; m.buttons = e->buttons; m.key = e->key; m.flags = e->flags; m.dx = e->dx; m.dy = e->dy; m.continuous = e->continuous;
 	struct iovec v = { &m, sizeof m };
-	{ int rc = ws_ipc_send(c->efd, &v, 1, NULL, 0); if (getenv("WSD_TRACE")) fprintf(stderr, "wsd:   send on the event channel: %d (errno %d)\n", rc, rc ? errno : 0); }                     /* non-blocking: a full channel drops the event */
+	{ int rc = ws_ipc_send(c->efd, &v, 1, NULL, 0); if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer:   send on the event channel: %d (errno %d)\n", rc, rc ? errno : 0); }                     /* non-blocking: a full channel drops the event */
 }
 
 static int tap_key_filter(void *ctx, int key, int down) { (void)ctx; return sls_tap_filter_key(key, down); }
@@ -454,7 +454,7 @@ static int do_create_window(conn *c, const uint8_t *buf, size_t len)
 	if (rq.region.type != MACH_MSG_OOL_DESCRIPTOR || rq.region.size != rq.region_size || len != sizeof rq + rq.region.size)
 		return reply_simple(c->fd, h, MIG_TYPE_ERROR);
 	if (rq.window_type != 2 && rq.window_type != 3 && rq.window_type != 5) {     /* mask 0x2c in the original */
-		fprintf(stderr, "wsd: CreateWindow refused: type %d\n", rq.window_type);
+		fprintf(stderr, "WindowServer: CreateWindow refused: type %d\n", rq.window_type);
 		return reply_simple(c->fd, h, CGS_ERROR_ILLEGAL_ARGUMENT);
 	}
 	ws_rect *rects; int n; ws_rect bounds;
@@ -463,7 +463,7 @@ static int do_create_window(conn *c, const uint8_t *buf, size_t len)
 		bounds.w = 1; bounds.h = 1;
 	}
 	if (pr || bounds.w <= 0 || bounds.h <= 0 || bounds.w > 8192 || bounds.h > 8192) {
-		fprintf(stderr, "wsd: CreateWindow refused: region of %u bytes, bounds %gx%g\n", rq.region.size, (double)bounds.w, (double)bounds.h);
+		fprintf(stderr, "WindowServer: CreateWindow refused: region of %u bytes, bounds %gx%g\n", rq.region.size, (double)bounds.w, (double)bounds.h);
 		return reply_simple(c->fd, h, CGS_ERROR_FAILURE);
 	}
 	{ int nw; double nb; ws_owner_usage(srv, c->id, &nw, &nb);                   /* a connection cannot exhaust the server: limits on windows and backing memory */
@@ -1154,7 +1154,7 @@ static int do_new_connection(conn *c, const uint8_t *buf, size_t len, int *fds, 
 	if (n > 0x400 || h->msgh_size - 0x54 < n || h->msgh_size != pad + 0x54) return reply_simple(c->fd, h, MIG_BAD_ARGUMENTS);
 	if (c->handshaken) return reply_simple(c->fd, h, CGS_ERROR_FAILURE);
 	int sv[2] = { -1, -1 };
-	if (nfds >= 1) {		/* the front of the Mach programs (wsbridge) brings the event channel itself: the end that wsd writes to; the client wakes on its notification port when something is written */
+	if (nfds >= 1) {		/* the front of the Mach programs (wsbridge) brings the event channel itself: the end that WindowServer writes to; the client wakes on its notification port when something is written */
 		sv[0] = fds[0]; for (int i = 1; i < nfds; i++) close(fds[i]);
 		fcntl(sv[0], F_SETFL, fcntl(sv[0], F_GETFL) | O_NONBLOCK);
 	} else {
@@ -1164,7 +1164,7 @@ static int do_new_connection(conn *c, const uint8_t *buf, size_t len, int *fds, 
 	memset(c->app, 0, sizeof c->app);
 	memcpy(c->app, buf + sizeof hd, n < sizeof c->app - 1 ? n : sizeof c->app - 1);
 	c->efd = sv[0]; c->handshaken = 1; c->pid = peer_pid(c->fd); c->mach = nfds >= 1;		/* a program of the Mac (through wsbridge) */
-	if (getenv("WSD_TRACE")) fprintf(stderr, "wsd: conn %u new connection, app \"%s\" (peer pid %d)\n", c->id, c->app, c->pid);
+	if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer: conn %u new connection, app \"%s\" (peer pid %d)\n", c->id, c->app, c->pid);
 	sls_new_connection_rep r; memset(&r, 0, sizeof r);
 	{ mach_msg_header_t rh; fill_reply_header(&rh, h, sizeof r, 1); memcpy(&r.h, &rh, sizeof rh); }
 	r.body.msgh_descriptor_count = 2;
@@ -1266,7 +1266,7 @@ static int dispatch(conn *c, uint8_t *buf, size_t len, int *fds, int nfds)
 	if (set < 0) { const char *e = getenv("WSD_OPSET"); set = e && atoi(e) == 26 ? 26 : 27; }
 	if (len >= 28 && h0->msgh_id == 0x50494400) {			/* the hello of the front of the Mach programs (wsbridge): the pid of the client that this socket belongs to (the peer of the socket is the front itself) */
 		c->cpid = (int)rd32(buf, 0x18); c->dock = 0;
-		if (getenv("WSD_TRACE")) fprintf(stderr, "wsd: conn %u is the process %d\n", c->id, c->cpid);
+		if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer: conn %u is the process %d\n", c->id, c->cpid);
 		return 0;
 	}
 	if (set == 26 && len >= sizeof *h0 && h0->msgh_id >= 30521 && h0->msgh_id < 30700) {
@@ -1275,8 +1275,8 @@ static int dispatch(conn *c, uint8_t *buf, size_t len, int *fds, int nfds)
 		h0->msgh_id += delta; wsd_reply_id_delta = -delta;
 		rc = dispatch2(c, buf, len, fds, nfds);
 		wsd_reply_id_delta = 0;
-		if (h0->msgh_id == 30578 && getenv("WSD_TEST_DG") && atoi(getenv("WSD_TEST_DG")) == 2) { for (uint32_t q = 0; q < c->notify_n; q++) { uint32_t rec[3] = { c->notify[q], 0, 0 }; wsd_datagram_push(c, 1, rec, sizeof rec); } fprintf(stderr, "wsd: pushed %u notifications of the interests\n", c->notify_n); }
-		else if (h0->msgh_id == 30578 && getenv("WSD_TEST_DG")) { uint8_t z[16]; memset(z, 0, sizeof z); wsd_datagram_push(c, atoi(getenv("WSD_TEST_DG")) & 1, z, sizeof z); fprintf(stderr, "wsd: test datagram pushed\n"); { uint8_t *b2 = (uint8_t *)buf; fprintf(stderr, "wsd: 30578 request:"); for (size_t q = 0x18; q < len && q < 0x48; q++) fprintf(stderr, " %02x", b2[q]); fprintf(stderr, "\n"); } }
+		if (h0->msgh_id == 30578 && getenv("WSD_TEST_DG") && atoi(getenv("WSD_TEST_DG")) == 2) { for (uint32_t q = 0; q < c->notify_n; q++) { uint32_t rec[3] = { c->notify[q], 0, 0 }; wsd_datagram_push(c, 1, rec, sizeof rec); } fprintf(stderr, "WindowServer: pushed %u notifications of the interests\n", c->notify_n); }
+		else if (h0->msgh_id == 30578 && getenv("WSD_TEST_DG")) { uint8_t z[16]; memset(z, 0, sizeof z); wsd_datagram_push(c, atoi(getenv("WSD_TEST_DG")) & 1, z, sizeof z); fprintf(stderr, "WindowServer: test datagram pushed\n"); { uint8_t *b2 = (uint8_t *)buf; fprintf(stderr, "WindowServer: 30578 request:"); for (size_t q = 0x18; q < len && q < 0x48; q++) fprintf(stderr, " %02x", b2[q]); fprintf(stderr, "\n"); } }
 		return rc;
 	}
 	return dispatch2(c, buf, len, fds, nfds);
@@ -1291,7 +1291,7 @@ static int dispatch2(conn *c, uint8_t *buf, size_t len, int *fds, int nfds)
 	if (h->msgh_size < sizeof *h || h->msgh_size > len) return reply_mig_error(c->fd, h, MIG_BAD_ARGUMENTS);
 	h->msgh_local_port = c->id;                                         /* the connection the request arrived on */
 	static int trace = -1; if (trace < 0) trace = getenv("WSD_TRACE") != NULL;
-	if (trace) fprintf(stderr, "wsd: request id %u (conn %u, pid %d, %u bytes)\n", h->msgh_id, c->id, c->pid, h->msgh_size);
+	if (trace) fprintf(stderr, "WindowServer: request id %u (conn %u, pid %d, %u bytes)\n", h->msgh_id, c->id, c->pid, h->msgh_size);
 	if (h->msgh_id >= WSX_FLUSH && h->msgh_id <= WSX_SET_NIGHT_SHIFT) { dirty = 1; return do_private(c, buf, len); }
 	if (h->msgh_id == SLS_MSG_CreateWindow) { dirty = 1; return do_create_window(c, buf, len); }
 	if (h->msgh_id == SLS_MSG_GetPortStreamOutofline) return do_get_stream(c, buf, len);
@@ -1307,7 +1307,7 @@ static int dispatch2(conn *c, uint8_t *buf, size_t len, int *fds, int nfds)
 		int rc = do_simple(c, buf, len);
 		if (rc != -2) { dirty = 1; return rc; }
 	}
-	if (trace) fprintf(stderr, "wsd: id %u is not implemented\n", h->msgh_id);
+	if (trace) fprintf(stderr, "WindowServer: id %u is not implemented\n", h->msgh_id);
 	return reply_mig_error(c->fd, h, MIG_BAD_ID);                       /* known id we do not implement, or an unknown id */
 }
 
@@ -1323,13 +1323,13 @@ static conn *conn_by_fd(int fd) { for (int i = 0; i < MAXCONN; i++) if (conns[i]
 static void display_changed(ws_kms *kms, int *hw_cursor, uint64_t *last_gen)
 {
 	int w = 0, h = 0;
-	if (ws_kms_set_mode(kms, &w, &h)) { fprintf(stderr, "wsd: display changed but the new mode could not be set\n"); return; }
-	fprintf(stderr, "wsd: display changed: %dx%d\n", w, h);
+	if (ws_kms_set_mode(kms, &w, &h)) { fprintf(stderr, "WindowServer: display changed but the new mode could not be set\n"); return; }
+	fprintf(stderr, "WindowServer: display changed: %dx%d\n", w, h);
 	wsd_screen_w = w; wsd_screen_h = h;
 	ws_server_resize(srv, w, h);
 	ws_surface *ns = ws_surface_new(w, h); if (ns) { ws_surface_free(screen); screen = ns; }
 #ifdef WS_GL
-	if (glc && glc_resize(glc, w, h)) { fprintf(stderr, "wsd: GL targets for the new size failed, using the software compositor\n"); glc_destroy(glc); glc = NULL; }
+	if (glc && glc_resize(glc, w, h)) { fprintf(stderr, "WindowServer: GL targets for the new size failed, using the software compositor\n"); glc_destroy(glc); glc = NULL; }
 #endif
 	*hw_cursor = 0; *last_gen = ~0ULL;
 	if (!getenv("WSD_NO_RESTART_CLIENTS")) {
@@ -1366,26 +1366,26 @@ int main(int argc, char **argv)
 	int vt_ok = 0, vt_active = 1;               /* console switching: vt_active is 0 while another VT is in front */
 	if (!strcmp(backend, "kms")) {
 		kms = ws_kms_open(card, &w, &h);
-		if (!kms) { fprintf(stderr, "wsd: cannot open KMS device %s\n", card); return 1; }
+		if (!kms) { fprintf(stderr, "WindowServer: cannot open KMS device %s\n", card); return 1; }
 		input = ws_evdev_open("/dev/input");
-		if (!input || ws_evdev_count(input) == 0) fprintf(stderr, "wsd: warning: no evdev input devices readable\n");
+		if (!input || ws_evdev_count(input) == 0) fprintf(stderr, "WindowServer: warning: no evdev input devices readable\n");
 	}
 #else
-	if (strcmp(backend, "headless")) { fprintf(stderr, "wsd: backend '%s' not built in (use gmake kms on FreeBSD)\n", backend); return 1; }
+	if (strcmp(backend, "headless")) { fprintf(stderr, "WindowServer: backend '%s' not built in (use gmake kms on FreeBSD)\n", backend); return 1; }
 	(void)card;
 #endif
 	wsd_screen_w = w; wsd_screen_h = h;
 	signal(SIGPIPE, SIG_IGN);
 	srv = ws_server_new(w, h); if (getenv("WSD_SPLASH")) ws_server_set_splash(srv, 1);
 	screen = ws_surface_new(w, h);
-	if (!srv || !screen) { fprintf(stderr, "wsd: out of memory\n"); return 1; }
+	if (!srv || !screen) { fprintf(stderr, "WindowServer: out of memory\n"); return 1; }
 	if (!strcmp(renderer, "gl")) {
 #ifdef WS_GL
 		glc = glc_create(render_node, w, h);
-		if (glc) fprintf(stderr, "wsd: GL compositor: %s\n", glc_describe(glc));
-		else fprintf(stderr, "wsd: GL compositor unavailable (EGL/GLES2 could not be initialised), using the software compositor\n");
+		if (glc) fprintf(stderr, "WindowServer: GL compositor: %s\n", glc_describe(glc));
+		else fprintf(stderr, "WindowServer: GL compositor unavailable (EGL/GLES2 could not be initialised), using the software compositor\n");
 #else
-		fprintf(stderr, "wsd: built without GL (use gmake gl on FreeBSD), using the software compositor\n");
+		fprintf(stderr, "WindowServer: built without GL (use gmake gl on FreeBSD), using the software compositor\n");
 		(void)render_node;
 #endif
 	}
@@ -1394,12 +1394,12 @@ int main(int argc, char **argv)
 	ws_server_set_key_filter(srv, tap_key_filter, NULL);
 
 	int ls = ws_ipc_listen(path);
-	if (ls < 0) { perror("wsd: listen"); return 1; }
+	if (ls < 0) { perror("WindowServer: listen"); return 1; }
 	int kq = kqueue();
 	struct kevent ev;
 	EV_SET(&ev, ls, EVFILT_READ, EV_ADD, 0, 0, NULL);
-	if (kevent(kq, &ev, 1, NULL, 0, NULL) < 0) { perror("wsd: kevent"); return 1; }
-	int cals = wsd_ca_listen(getenv("WSD_CA_SOCKET") ? getenv("WSD_CA_SOCKET") : "/tmp/wsd-ca.sock");		/* the CoreAnimation commits of carender-stub */
+	if (kevent(kq, &ev, 1, NULL, 0, NULL) < 0) { perror("WindowServer: kevent"); return 1; }
+	int cals = wsd_ca_listen(getenv("WSD_CA_SOCKET") ? getenv("WSD_CA_SOCKET") : "/tmp/WindowServer-ca.sock");		/* the CoreAnimation commits of carender-stub */
 	if (cals >= 0) { EV_SET(&ev, cals, EVFILT_READ, EV_ADD, 0, 0, NULL); kevent(kq, &ev, 1, NULL, 0, NULL); }
 #ifdef WS_KMS
 	if (kms) {
@@ -1414,19 +1414,19 @@ int main(int argc, char **argv)
 		signal(SIGUSR1, SIG_IGN); signal(SIGUSR2, SIG_IGN); signal(SIGTERM, SIG_IGN); signal(SIGINT, SIG_IGN);
 		int sigs[4] = { SIGUSR1, SIGUSR2, SIGTERM, SIGINT };
 		for (int i = 0; i < 4; i++) { EV_SET(&ev, sigs[i], EVFILT_SIGNAL, EV_ADD, 0, 0, NULL); kevent(kq, &ev, 1, NULL, 0, NULL); }
-		if (!vt_ok) fprintf(stderr, "wsd: not on a vt(4) console: no console switching (input stays grabbed)\n");
+		if (!vt_ok) fprintf(stderr, "WindowServer: not on a vt(4) console: no console switching (input stays grabbed)\n");
 	}
 #endif
 	if (vnc_port > 0) {                                                            /* -V port: a VNC viewer on 127.0.0.1:port (WSD_VNC_PASSWORD, at most 8 characters, enables password authentication) */
 		const char *pw = getenv("WSD_VNC_PASSWORD");
 		vnc_ls = wsd_vnc_listen(vnc_port, pw);
-		if (vnc_ls < 0) { perror("wsd: vnc listen"); return 1; }
+		if (vnc_ls < 0) { perror("WindowServer: vnc listen"); return 1; }
 		EV_SET(&ev, vnc_ls, EVFILT_READ, EV_ADD, 0, 0, NULL); kevent(kq, &ev, 1, NULL, 0, NULL);
 		ws_input_init(&vin, w, h); vin.accel = 0;
-		fprintf(stderr, "wsd: VNC on 127.0.0.1:%d%s\n", vnc_port, pw && *pw ? " (password)" : " (no password)");
+		fprintf(stderr, "WindowServer: VNC on 127.0.0.1:%d%s\n", vnc_port, pw && *pw ? " (password)" : " (no password)");
 	}
-	fprintf(stderr, "wsd: %dx%d, backend %s, listening on %s\n", w, h, backend, path);
-	if (sandbox) { if (wsd_sandbox_enter(ls, kq) == 0) fprintf(stderr, "wsd: capability mode\n"); else if (sandbox == 2) return 1; }
+	fprintf(stderr, "WindowServer: %dx%d, backend %s, listening on %s\n", w, h, backend, path);
+	if (sandbox) { if (wsd_sandbox_enter(ls, kq) == 0) fprintf(stderr, "WindowServer: capability mode\n"); else if (sandbox == 2) return 1; }
 
 	while (running) {
 		struct kevent out[16];
@@ -1447,7 +1447,7 @@ int main(int argc, char **argv)
 		if (fus_active) { static struct timespec q = { 0, 250 * 1000 * 1000 }; if (!to || to->tv_sec > 0 || to->tv_nsec > q.tv_nsec) to = &q; }       /* the console may change at any time: look at it four times a second */
 		int n = kevent(kq, NULL, 0, out, 16, to);
 		{ static uid_t seen = (uid_t)-2; sess_refresh(); uid_t now_c = fus_active ? console_uid : (uid_t)-3; if (now_c != seen) { seen = now_c; ws_server_invalidate(srv); dirty = 1; } }
-		if (n < 0) { if (errno == EINTR) continue; perror("wsd: kevent"); break; }
+		if (n < 0) { if (errno == EINTR) continue; perror("WindowServer: kevent"); break; }
 #ifdef WS_KMS
 		if (input) {
 			static struct timespec last_scan; struct timespec now_ts; clock_gettime(CLOCK_MONOTONIC, &now_ts);
@@ -1461,7 +1461,7 @@ int main(int argc, char **argv)
 		for (int i = 0; i < n; i++) {
 			int fd = (int)out[i].ident;
 			if (vnc_ls >= 0 && out[i].filter == EVFILT_READ && fd == vnc_ls) { int cfd = wsd_vnc_accept(); if (cfd >= 0) { EV_SET(&ev, cfd, EVFILT_READ, EV_ADD, 0, 0, NULL); kevent(kq, &ev, 1, NULL, 0, NULL); } continue; }
-			if (vnc_ls >= 0 && out[i].filter == EVFILT_READ && fd == wsd_vnc_client_fd()) { wsd_vnc_read(srv, &vin, w, h, "wsd"); dirty = 1; continue; }
+			if (vnc_ls >= 0 && out[i].filter == EVFILT_READ && fd == wsd_vnc_client_fd()) { wsd_vnc_read(srv, &vin, w, h, "WindowServer"); dirty = 1; continue; }
 #ifdef WS_KMS
 			if (out[i].filter == EVFILT_SIGNAL) {
 				if (fd == SIGUSR1) { vt_active = 0; if (kms) ws_kms_pause(kms); wsd_vt_release_ack(); }
@@ -1521,7 +1521,7 @@ int main(int argc, char **argv)
 			}
 			if (wsd_vnc_backlog()) vnc_backlog_loops++;
 			if (vnc_updates || vnc_backlog_loops) { struct timespec tn; clock_gettime(CLOCK_MONOTONIC, &tn); double nowt = tn.tv_sec + tn.tv_nsec / 1e9;
-				if (nowt - vnc_report >= 5.0) { if (vnc_report > 0 && vnc_updates) fprintf(stderr, "wsd: vnc %d updates in 5 s, compose %.1f ms each, viewer behind %d loops\n", vnc_updates, vnc_render_ms / vnc_updates, vnc_backlog_loops); vnc_report = nowt; vnc_updates = 0; vnc_render_ms = 0; vnc_backlog_loops = 0; } }
+				if (nowt - vnc_report >= 5.0) { if (vnc_report > 0 && vnc_updates) fprintf(stderr, "WindowServer: vnc %d updates in 5 s, compose %.1f ms each, viewer behind %d loops\n", vnc_updates, vnc_render_ms / vnc_updates, vnc_backlog_loops); vnc_report = nowt; vnc_updates = 0; vnc_render_ms = 0; vnc_backlog_loops = 0; } }
 		}
 #ifdef WS_KMS
 		if (kms && vt_active) {

@@ -21,7 +21,7 @@ static void hdr(uint8_t *m, uint32_t size, int id, int complex)
 }
 
 /* TEST_MUTATE=N: every request this test sends is also sent, N times, in mutated form (flipped bytes, odd sizes, the complex bit toggled) on a second connection, whose answers are
- * drained: with wsd running under the sanitizers this reaches the stateful handlers with the exact shapes the tests use */
+ * drained: with WindowServer running under the sanitizers this reaches the stateful handlers with the exact shapes the tests use */
 static void mutants(const uint8_t *req, size_t n)
 {
 	static int mfd = -2, nmut = -1; static uint64_t rs = 0x2545f4914f6cdd1dull;
@@ -903,7 +903,7 @@ int main(void)
 		w32(en, 0x34, 0x7ffff); CHECK(rc(fd, en, 0x48) == 1000);
 	}
 
-	/* GetDisplaySystemState: the layout of the real state (header, mode records, tail), filled for wsd's display (640x480 in the test) */
+	/* GetDisplaySystemState: the layout of the real state (header, mode records, tail), filled for WindowServer's display (640x480 in the test) */
 	{
 		uint8_t q[0x28]; memset(q, 0, sizeof q); hdr(q, 0x28, SLS_MSG_GetDisplaySystemState, 0); memcpy(q + 0x18, &WS_NDR, 8); w32(q, 0x20, 13);
 		uint8_t big[4096];

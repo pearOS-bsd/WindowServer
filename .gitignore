@@ -1,4 +1,4 @@
-wsd
+WindowServer
 /test_*
 !/test_*.c
 *.o

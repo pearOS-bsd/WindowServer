@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# wsd needs SkyLight (github.com/pearOS-bsd/SkyLight, the protocol): checked out next to the sources and passed with SKYLIGHT=
+# WindowServer needs SkyLight (github.com/pearOS-bsd/SkyLight, the protocol): checked out next to the sources and passed with SKYLIGHT=
 jobs:
   # The real target: FreeBSD on x86_64 (QEMU). Runs the test suite and renders the test window with the software compositor.
   freebsd:

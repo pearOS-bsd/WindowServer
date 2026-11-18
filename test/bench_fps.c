@@ -1,4 +1,4 @@
-/* bench_fps: frame rate of a running wsd (WS_SOCKET) with an animated scene: four windows with shadows and glass (blur) that move in circles for BENCH_SECONDS (default 8);
+/* bench_fps: frame rate of a running WindowServer (WS_SOCKET) with an animated scene: four windows with shadows and glass (blur) that move in circles for BENCH_SECONDS (default 8);
  * prints the mean frame rate and mean frame time the server reports (ws_fps). Used to compare the GL compositor with the software one, on a real GPU or on virgl in a VM. */
 #include <math.h>
 #include <stdio.h>

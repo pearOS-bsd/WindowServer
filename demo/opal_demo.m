@@ -1,4 +1,4 @@
-/* CoreGraphics (Opal, GNUstep's implementation over Cairo) drawing into a window of wsd: the window's pixels are a shared buffer registered with the server,
+/* CoreGraphics (Opal, GNUstep's implementation over Cairo) drawing into a window of WindowServer: the window's pixels are a shared buffer registered with the server,
  * a CGBitmapContext is created over that memory, vector shapes, text with anti-aliasing and an image are drawn, then the surface is flushed. */
 #import <CoreGraphics/CoreGraphics.h>
 #include "ws_client.h"
@@ -24,7 +24,7 @@ int main(int argc, char **argv)
 {
 	const char *out = argc > 1 ? argv[1] : "opal.ppm";
 	ws_conn *c = ws_connect(NULL);
-	if (!c) { fprintf(stderr, "opal_demo: cannot connect to wsd\n"); return 1; }
+	if (!c) { fprintf(stderr, "opal_demo: cannot connect to WindowServer\n"); return 1; }
 	enum { W = 560, H = 360 };
 	ws_win w; ws_cbuf cb; uint32_t sid;
 	if (ws_win_create(c, (ws_rect){ 120, 100, W, H }, 0, &w) || ws_cbuf_create(c, W, H, &cb) || ws_surface_add(c, &w, &sid) || ws_surface_bind_buffer(c, &w, sid, &cb)) { fprintf(stderr, "opal_demo: window setup failed\n"); return 1; }
@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 	const char *line1 = "wsbsd: Quartz 2D on FreeBSD";
 	CGContextShowTextAtPoint(g, 48, 90 + 200, line1, strlen(line1));
 	CGContextSelectFont(g, "DejaVu Sans", 16, kCGEncodingMacRoman);
-	const char *line2 = "CoreGraphics (Opal/Cairo) into a wsd window";
+	const char *line2 = "CoreGraphics (Opal/Cairo) into a WindowServer window";
 	CGContextShowTextAtPoint(g, 48, 66 + 200, line2, strlen(line2));
 	/* an image made from a bitmap, drawn scaled */
 	{

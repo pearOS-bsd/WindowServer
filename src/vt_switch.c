@@ -1,5 +1,5 @@
-/* Console (VT) switching for the KMS backend on FreeBSD vt(4). While wsd owns the display it puts its VT into graphics mode and turns the console keyboard off, and it asks the kernel to
- * hand over SIGUSR1 when the user switches away (release) and SIGUSR2 when the VT comes back (acquire). While another VT is active wsd drops DRM master and discards raw input, so keystrokes
+/* Console (VT) switching for the KMS backend on FreeBSD vt(4). While WindowServer owns the display it puts its VT into graphics mode and turns the console keyboard off, and it asks the kernel to
+ * hand over SIGUSR1 when the user switches away (release) and SIGUSR2 when the VT comes back (acquire). While another VT is active WindowServer drops DRM master and discards raw input, so keystrokes
  * typed on the other console never reach the window server (or its clients). */
 #ifdef WS_KMS
 #include "wsd_priv.h"
@@ -22,7 +22,7 @@ static struct termios old_tio; static int have_tio;
 int wsd_vt_setup(const char *console)
 {
 #ifdef __FreeBSD__
-	/* a daemon has no controlling terminal: the console device wsd was told to draw on (-c /dev/ttyv0) is the VT to take over */
+	/* a daemon has no controlling terminal: the console device WindowServer was told to draw on (-c /dev/ttyv0) is the VT to take over */
 	vtfd = -1;
 	if (console && !strncmp(console, "/dev/ttyv", 9)) vtfd = open(console, O_RDWR | O_CLOEXEC | O_NONBLOCK);
 	if (vtfd < 0) vtfd = open("/dev/tty", O_RDWR | O_CLOEXEC);

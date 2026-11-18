@@ -1,4 +1,4 @@
-/* wsspace shutdown | get | active SPACE | window ID SPACE: full-screen spaces through the wsd private extension (tests) */
+/* wsspace shutdown | get | active SPACE | window ID SPACE: full-screen spaces through the WindowServer private extension (tests) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

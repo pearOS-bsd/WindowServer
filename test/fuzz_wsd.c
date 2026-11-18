@@ -1,4 +1,4 @@
-/* fuzz_wsd: throws random well-framed requests (every SkyLight id 29000..34100 plus the private ids, random sizes and bytes, optional OOL descriptor) at a running wsd and
+/* fuzz_wsd: throws random well-framed requests (every SkyLight id 29000..34100 plus the private ids, random sizes and bytes, optional OOL descriptor) at a running WindowServer and
  * checks it keeps answering. Run under a sanitizer build:  WS_SOCKET=... ./fuzz_wsd [iterations] [seed] */
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,13 +43,13 @@ int main(int argc, char **argv)
 			if (n + k <= sizeof m) total = n + k;
 		}
 		struct iovec v = { m, total };
-		if (ws_ipc_send(fd, &v, 1, NULL, 0)) { if (!wc) close(fd); fd = ws_ipc_connect(path); reconnects++; if (fd < 0) { printf("FAIL: wsd gone at iteration %d id %d\n", i, id); return 1; } continue; }
+		if (ws_ipc_send(fd, &v, 1, NULL, 0)) { if (!wc) close(fd); fd = ws_ipc_connect(path); reconnects++; if (fd < 0) { printf("FAIL: WindowServer gone at iteration %d id %d\n", i, id); return 1; } continue; }
 		int fds[WS_IPC_MAX_FDS], nf = 0;
 		ssize_t g = ws_ipc_recv(fd, rep, sizeof rep, fds, &nf);
 		for (int k = 0; k < nf; k++) close(fds[k]);
 		if (g > 0) answered++;
-		else { if (!wc) close(fd); fd = ws_ipc_connect(path); reconnects++; if (fd < 0) { printf("FAIL: wsd gone at iteration %d id %d\n", i, id); return 1; } }
+		else { if (!wc) close(fd); fd = ws_ipc_connect(path); reconnects++; if (fd < 0) { printf("FAIL: WindowServer gone at iteration %d id %d\n", i, id); return 1; } }
 	}
-	printf("fuzz: %d requests, %d answered, %d reconnects, wsd alive\n", iters, answered, reconnects);
+	printf("fuzz: %d requests, %d answered, %d reconnects, WindowServer alive\n", iters, answered, reconnects);
 	return 0;
 }

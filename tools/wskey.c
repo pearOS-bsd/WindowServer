@@ -1,4 +1,4 @@
-/* wskey code...: presses and releases each CGKeyCode in turn (through the wsd test injection); +code only presses (a modifier held: 55 command, 56 shift, 58 option, 59 control), -code only releases:  wskey +55 2 -55  is command-D */
+/* wskey code...: presses and releases each CGKeyCode in turn (through the WindowServer test injection); +code only presses (a modifier held: 55 command, 56 shift, 58 option, 59 control), -code only releases:  wskey +55 2 -55  is command-D */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

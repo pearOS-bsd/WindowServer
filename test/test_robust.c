@@ -1,4 +1,4 @@
-/* Robustness: clients that die, garbage and truncated messages, and exhausted limits must never take wsd down or leak its state. */
+/* Robustness: clients that die, garbage and truncated messages, and exhausted limits must never take WindowServer down or leak its state. */
 #include "ws_client.h"
 #include "ws_ipc.h"
 #include "sls_wire.h"

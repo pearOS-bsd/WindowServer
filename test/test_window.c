@@ -122,7 +122,7 @@ int main(int argc, char **argv)
 {
 	const char *out = argc > 1 ? argv[1] : "window.ppm";
 	ws_conn *c = ws_connect(NULL);
-	if (!c) { fprintf(stderr, "test_window: cannot connect to wsd\n"); return 1; }
+	if (!c) { fprintf(stderr, "test_window: cannot connect to WindowServer\n"); return 1; }
 	ws_win back, main_w, hud, surf_w;
 	if (ws_win_create(c, (ws_rect){ 70, 330, 520, 300 }, 0, &back) ||
 	    ws_win_create(c, (ws_rect){ 230, 110, 700, 440 }, 0, &main_w) ||

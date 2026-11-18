@@ -1,7 +1,7 @@
-/* wscarender: the CoreAnimation scene of the commits that carender-stub keeps (ca.bin + ca-ool-<n>-<k>.bin), composed and shown in a window of wsd.
+/* wscarender: the CoreAnimation scene of the commits that carender-stub keeps (ca.bin + ca-ool-<n>-<k>.bin), composed and shown in a window of WindowServer.
  * It is the C port of darwinator/tools/ca/{caparse,ca_scene}.py: decode the command stream of the render server protocol (messages 0x9c42..0x9c45), follow the layers,
- * give every Image its pixels from the out-of-line data, paint the tree.  A client of wsd for now; the decoder and the painter (everything above main) are meant to move into the
- * render server of wsd (CARenderServer) when it takes the commits itself.
+ * give every Image its pixels from the out-of-line data, paint the tree.  A client of WindowServer for now; the decoder and the painter (everything above main) are meant to move into the
+ * render server of WindowServer (CARenderServer) when it takes the commits itself.
  *
  *   usage: wscarender CADIR [x y [level [w h]]]        (CADIR holds ca.bin and the ca-ool files; reloads when ca.bin grows)
  *
@@ -434,7 +434,7 @@ void ca_paint(uint8_t *bgra, int w_, int h_, int stride)
 	for (int j = 0; j < h_; j++) for (int i = 0; i < w_; i++) { uint8_t *p = bgra + (size_t)j * stride + i * 4; p[0] = 30; p[1] = 28; p[2] = 28; p[3] = 255; }
 	for (int k = 0; k < nscenes; k++) { S = scenes[k]; paint_scene(&cv); }
 }
-/* one scene on a transparent canvas (premultiplied BGRA): the content of a window of wsd */
+/* one scene on a transparent canvas (premultiplied BGRA): the content of a window of WindowServer */
 void ca_paint_scene(int idx, uint8_t *bgra, int w_, int h_, int stride)
 {
 	ca_canvas cv = { bgra, w_, h_, stride };

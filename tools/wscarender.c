@@ -1,5 +1,5 @@
-/* wscarender: shows the CoreAnimation scene of ca.bin (+ ca-ool files) in a window of wsd.  usage: wscarender CADIR [x y [level [w h]]]
- * The decoding and painting live in src/ca_scene.c (the part that is meant to run inside wsd). */
+/* wscarender: shows the CoreAnimation scene of ca.bin (+ ca-ool files) in a window of WindowServer.  usage: wscarender CADIR [x y [level [w h]]]
+ * The decoding and painting live in src/ca_scene.c (the part that is meant to run inside WindowServer). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -15,7 +15,7 @@ int main(int argc, char **argv)
 
 	if (argc < 2) { fprintf(stderr, "usage: wscarender CADIR [x y [level [w h]]]\n"); return 1; }
 	ca_set_dir(argv[1]); snprintf(path, sizeof path, "%s/ca.bin", argv[1]);
-	if ((c = ws_connect(NULL)) == NULL) { fprintf(stderr, "wscarender: cannot connect to wsd\n"); return 1; }
+	if ((c = ws_connect(NULL)) == NULL) { fprintf(stderr, "wscarender: cannot connect to WindowServer\n"); return 1; }
 	if (ws_win_create(c, (ws_rect){ x, y, w, h }, level, &win)) { fprintf(stderr, "wscarender: cannot create the window\n"); return 1; }
 	ws_win_order(c, &win, WS_ABOVE, 0);
 	for (;;) {

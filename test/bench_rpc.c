@@ -1,4 +1,4 @@
-/* bench_rpc: round trips per second of a cheap request (GetWindowLevel) against a running wsd (WS_SOCKET) */
+/* bench_rpc: round trips per second of a cheap request (GetWindowLevel) against a running WindowServer (WS_SOCKET) */
 #include <stdio.h>
 #include <time.h>
 #include "ws_client.h"

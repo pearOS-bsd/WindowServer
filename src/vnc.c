@@ -1,4 +1,4 @@
-/* A small VNC (RFB 3.8) server for wsd: remote view and control of the composed screen, e.g. over an SSH tunnel. One client at a time, raw encoding of the changed 64x64 tiles, VNC
+/* A small VNC (RFB 3.8) server for WindowServer: remote view and control of the composed screen, e.g. over an SSH tunnel. One client at a time, raw encoding of the changed 64x64 tiles, VNC
  * password authentication (a random or given password) or none when no password is set; the listener binds to 127.0.0.1 only. */
 #include "wsd_priv.h"
 #include "ws_input.h"
@@ -53,7 +53,7 @@ int wsd_vnc_des_response(const char *password, const uint8_t challenge[16], uint
 #endif
 }
 
-static uint8_t *outb; static size_t outn, outcap, outoff;                /* data waiting for a slow viewer: wsd never blocks on the viewer's socket */
+static uint8_t *outb; static size_t outn, outcap, outoff;                /* data waiting for a slow viewer: WindowServer never blocks on the viewer's socket */
 static int queue(const void *p, size_t n)
 {
 	if (outoff && outoff == outn) outoff = outn = 0;
