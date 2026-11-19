@@ -1341,6 +1341,7 @@ static void display_changed(ws_kms *kms, int *hw_cursor, uint64_t *last_gen)
 			conn *c = &conns[i]; if (c->fd < 0 || !c->mach || c->efd < 0) continue;
 			for (uint32_t k = 0; k < c->notify_n; k++) if (c->notify[k] == types[t]) { uint32_t rec[3] = { types[t], 0, 0 }; wsd_datagram_push(c, 1, rec, sizeof rec); told++; break; }
 		}
+		for (int i = 0; i < MAXCONN; i++) { conn *c = &conns[i]; if (c->fd < 0) continue; fprintf(stderr, "WindowServer: conn %u pid %d mach %d efd %d interests %u:", c->id, c->cpid, c->mach, c->efd, c->notify_n); for (uint32_t k = 0; k < c->notify_n && k < 24; k++) fprintf(stderr, " %u", c->notify[k]); fprintf(stderr, "\n"); }
 		fprintf(stderr, "WindowServer: display reconfiguration announced %d times to the connections that asked for it\n", told);
 	}
 	if (!getenv("WSD_NO_RESTART_CLIENTS")) {       /* until the notifications above are verified to move every client: the ones that lay themselves out by the screen restart (launchd brings them back); WSD_NO_RESTART_CLIENTS=1 tests the real path alone */
