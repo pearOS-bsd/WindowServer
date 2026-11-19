@@ -174,7 +174,8 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 	int any = 0, bx0 = 1 << 30, by0 = 1 << 30, bx1 = -(1 << 30), by1 = -(1 << 30);
 	for (int i = 0; i < n; i++) if (g[i].mode > 0 && g[i].rect.w > 3 && g[i].rect.h > 3) {
 		any = 1; int x0 = ox + g[i].rect.x, y0 = oy + g[i].rect.y;
-		if (x0 < bx0) bx0 = x0; if (y0 < by0) by0 = y0; if (x0 + g[i].rect.w > bx1) bx1 = x0 + g[i].rect.w; if (y0 + g[i].rect.h > by1) by1 = y0 + g[i].rect.h;
+		int ms = (g[i].mode == 9 || g[i].mode == 10) ? 36 : 0;        /* the shadow of the regular glass reaches about 1.5 radii (24) around, 8 px lower */
+		if (x0 - ms < bx0) bx0 = x0 - ms; if (y0 - ms < by0) by0 = y0 - ms; if (x0 + g[i].rect.w + ms > bx1) bx1 = x0 + g[i].rect.w + ms; if (y0 + g[i].rect.h + ms + (ms ? 8 : 0) > by1) by1 = y0 + g[i].rect.h + ms + (ms ? 8 : 0);
 	}
 	if (!any) return;
 	float Lbase = getenv("WS_GLASS_L") ? (float)atof(getenv("WS_GLASS_L")) : 18.0f, amp = getenv("WS_GLASS_AMP") ? (float)atof(getenv("WS_GLASS_AMP")) : 15.0f;
@@ -211,7 +212,15 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 			continue;
 		}
 		float sdf = glass_field(g, n, ox, oy, fx, fy, &mode);
-		float cover = clampf(0.5f - sdf, 0, 1); if (cover <= 0) continue;
+		float cover = clampf(0.5f - sdf, 0, 1);
+		if (cover <= 0) {                   /* outside the glass: the shadow of the regular glass (glassBackground ShadowOpacity 0.6, ShadowRadius 24, ShadowOffset (0, 8)): the backdrop darkened by a gaussian-blurred copy of the shape moved down by the offset (an erfc edge, sigma radius / 2); under the glass itself it does not show */
+			if (sdf > 40.0f) continue;
+			int dm2; float sd2 = glass_field(g, n, ox, oy, fx, fy - 8.0f, &dm2); if (dm2 != 9 && dm2 != 10) continue;
+			float strength = 0.6f * (dm2 == 10 ? 0.6f : 1.0f) * 0.5f * erfcf(sd2 / (1.41421356f * 12.0f)); if (strength < 0.004f) continue;
+			uint8_t *dp = img->px + (size_t)y * img->stride + (size_t)x * 4; float k = 1.0f - strength;
+			dp[0] = (uint8_t)(dp[0] * k + 0.5f); dp[1] = (uint8_t)(dp[1] * k + 0.5f); dp[2] = (uint8_t)(dp[2] * k + 0.5f);
+			continue;
+		}
 		if ((mode == 5 || mode == 6 || mode == 7 || mode == 8) && bl5) {                                                              /* the context menu of the real Mac: out = f(L) + k (c - L) of the blurred backdrop (fitted to 23 measured backdrops, rms 3.8 / 255), f(L) = 0.1213 + 0.4825 (2L - L^2), L = .1886 r + .7455 g + .0659 b, k = 1.091; a 1 px highlight at the edge, strong on horizontal edges */
 			int bxp = x - cx0, byp = y - cy0; if (bxp < 0 || byp < 0 || bxp >= bl5->w || byp >= bl5->h) continue;
 			float dd = -sdf; if (dd < 0) dd = 0;
