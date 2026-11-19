@@ -1033,11 +1033,11 @@ static int deliver_to_process(conn *t, const uint8_t *rec, size_t n)
  * Broadcast: type@0x20, n@0x24, data@0x28; size pad4(n) + 0x28; delivered to every connection whose notification interests (SetConnectionNotifyInterests) list the type. Always 0. */
 static void push_notification(conn *t, uint32_t type, const uint8_t *data, uint32_t n)
 {
-	if (!t || t->efd < 0) return;
+	if (!t || t->efd < 0) { static int n; if (type == 0x54415044u && n < 10) { n++; fprintf(stderr, "wsd: tap notification dropped: %s\n", t ? "no event channel" : "no connection"); } return; }
 	wsx_notify_msg m; memset(&m, 0, sizeof m);
 	m.h.msgh_bits = MACH_MSG_TYPE_MOVE_SEND_ONCE; m.h.msgh_size = sizeof m; m.h.msgh_id = WSX_NOTIFY_PUSH;
 	m.ndr = WS_NDR; m.type = type; m.len = n > sizeof m.data ? (uint32_t)sizeof m.data : n; memcpy(m.data, data, m.len);
-	ws_ipc_send(t->efd, &(struct iovec){ &m, sizeof m }, 1, NULL, 0);
+	int sr = ws_ipc_send(t->efd, &(struct iovec){ &m, sizeof m }, 1, NULL, 0); { static int k; if (type == 0x54415044u && k < 10) { k++; fprintf(stderr, "wsd: tap notification to conn %u: send %d\n", t->id, sr); } }
 }
 void wsd_push_notification(uint32_t owner, uint32_t type, const uint8_t *data, uint32_t n) { push_notification(conn_by_id(owner), type, data, n); }
 static int do_post_notification(conn *c, const uint8_t *buf, size_t len, int broadcast)
