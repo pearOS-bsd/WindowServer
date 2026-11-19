@@ -1332,9 +1332,20 @@ static void display_changed(ws_kms *kms, int *hw_cursor, uint64_t *last_gen)
 	if (glc && glc_resize(glc, w, h)) { fprintf(stderr, "WindowServer: GL targets for the new size failed, using the software compositor\n"); glc_destroy(glc); glc = NULL; }
 #endif
 	*hw_cursor = 0; *last_gen = ~0ULL;
-	if (!getenv("WSD_NO_RESTART_CLIENTS")) {
-		static const char *const names[] = { "Dock", "SystemUIServer" };
-		for (int i = 0; i < 2; i++) { pid_t p = fork(); if (p == 0) { execlp("pkill", "pkill", "-x", names[i], (char *)NULL); _exit(127); } }
+	/* the clients that lay themselves out by the screen (the desktop picture of the Finder, the Dock, the menu bar) are told as the real WindowServer tells them: the notifications that SkyLight's
+	 * display code registers for in every process (decompiled: initDisplays adds callbacks for 100 = display will reconfigure, 114 = display reconfigured, 115 = reconfiguration finalized; they read the
+	 * new geometry from the server by themselves and call the CGDisplayReconfigurationCallbacks of the process, which AppKit turns into NSApplicationDidChangeScreenParametersNotification) */
+	{
+		static const uint32_t types[3] = { 100, 114, 115 }; int told = 0;
+		for (int t = 0; t < 3; t++) for (int i = 0; i < MAXCONN; i++) {
+			conn *c = &conns[i]; if (c->fd < 0 || !c->mach || c->efd < 0) continue;
+			for (uint32_t k = 0; k < c->notify_n; k++) if (c->notify[k] == types[t]) { uint32_t rec[3] = { types[t], 0, 0 }; wsd_datagram_push(c, 1, rec, sizeof rec); told++; break; }
+		}
+		fprintf(stderr, "WindowServer: display reconfiguration announced %d times to the connections that asked for it\n", told);
+	}
+	if (!getenv("WSD_NO_RESTART_CLIENTS")) {       /* until the notifications above are verified to move every client: the ones that lay themselves out by the screen restart (launchd brings them back); WSD_NO_RESTART_CLIENTS=1 tests the real path alone */
+		static const char *const names[] = { "Dock", "SystemUIServer", "Finder" };
+		for (int i = 0; i < 3; i++) { pid_t p = fork(); if (p == 0) { execlp("pkill", "pkill", "-x", names[i], (char *)NULL); _exit(127); } }
 	}
 }
 #endif
