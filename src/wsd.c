@@ -255,7 +255,7 @@ static void tap_deliver(const ws_event *e)
 	int cg; uint8_t rec[512]; size_t n = 0; ws_rect f = { 0, 0, 0, 0 }; ws_window_frame(srv, e->wid, &f);
 	float gx = (float)(f.x + e->x), gy = (float)(f.y + e->y);
 	switch (e->type) {
-	case WS_EV_MOUSE_MOVE: cg = 5; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 0, 0, 0); break;
+	case WS_EV_MOUSE_MOVE: cg = (e->buttons & 1) ? 6 : (e->buttons & 2) ? 7 : 5; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 0, 0, 0); break;      /* a move with a button down is a drag */
 	case WS_EV_MOUSE_DOWN: cg = (e->buttons & 2) ? 3 : 1; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
 	case WS_EV_MOUSE_UP: cg = (e->buttons & 2) ? 4 : 2; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
 	case WS_EV_KEY_DOWN: cg = 10; n = ws_evrec_make_key(rec, sizeof rec, 1, e->key, e->flags, gx, gy, 0, 0, 0x0a); break;
@@ -278,7 +278,7 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e)
 		int cg; uint8_t rec[512]; size_t n = 0; ws_rect f = { 0, 0, 0, 0 }; ws_window_frame(srv, e->wid, &f);
 		float gx = (float)(f.x + e->x), gy = (float)(f.y + e->y);
 		switch (e->type) {
-		case WS_EV_MOUSE_MOVE: cg = 5; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 0, 0, 0); break;
+		case WS_EV_MOUSE_MOVE: cg = (e->buttons & 1) ? 6 : (e->buttons & 2) ? 7 : 5; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 0, 0, 0); break;      /* a move with a button down is a drag */
 		case WS_EV_MOUSE_DOWN: cg = (e->buttons & 2) ? 3 : 1; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
 		case WS_EV_MOUSE_UP: cg = (e->buttons & 2) ? 4 : 2; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
 		case WS_EV_KEY_DOWN: cg = 10; n = ws_evrec_make_key(rec, sizeof rec, 1, e->key, e->flags, gx, gy, 0, 0, 0x0a); break;

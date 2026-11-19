@@ -77,7 +77,7 @@ static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id =
 /* ---- decoder ---- */
 typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
-static int ool_desc[32], n_ool;		/* descriptor indexes of its out-of-line data */
+static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
 
 static void skip_obj(rd *r, int depth, contents_t *ct);
@@ -244,7 +244,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 	if (bits & 0x80000000u) {
 		uint32_t nd; memcpy(&nd, m + 0x18, 4);
 		for (uint32_t i = 0; i < nd && st + 12 <= n; i++) {
-			if (st + 12 <= n && m[st + 11] == 1) { if (n_ool < 32) ool_desc[n_ool++] = (int)i; st += 16; } else st += 12;
+			if (st + 12 <= n && m[st + 11] == 1) { if (n_ool < 256) ool_desc[n_ool++] = (int)i; st += 16; } else st += 12;
 		}
 		cur_ool_msg = (*nmsg)++;
 	}
