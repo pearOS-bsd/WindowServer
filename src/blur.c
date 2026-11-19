@@ -190,11 +190,13 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 	if (ox1 > ox0 && oy1 > oy0 && fx_restore(img, gkey, ghash, ox0, oy0, ox1, oy1)) return;
 	ws_surface *tmp = ws_surface_new(cx1 - cx0, cy1 - cy0); if (!tmp) return;                 /* the backdrop as it is now: the lens samples from it while the result is written to the image */
 	for (int y = cy0; y < cy1; y++) memcpy(tmp->px + (size_t)(y - cy0) * tmp->stride, img->px + (size_t)y * img->stride + (size_t)cx0 * 4, (size_t)(cx1 - cx0) * 4);
-	ws_surface *bl = NULL, *bl5 = NULL;                                                     /* the menu materials work on a blurred copy of the backdrop: modes 3, 4 (Menu.caar) sigma 30, mode 5 (the context menu as measured on the Mac) sigma 4.5 */
+	ws_surface *bl = NULL, *bl5 = NULL, *bl9 = NULL;                                                     /* the menu materials work on a blurred copy of the backdrop: modes 3, 4 (Menu.caar) sigma 30, mode 5 (the context menu as measured on the Mac) sigma 4.5 */
 	for (int i = 0; i < n; i++) { if (g[i].mode == 3 || g[i].mode == 4) { if (!bl) bl = ws_surface_new(tmp->w, tmp->h); } else if ((g[i].mode == 5 || g[i].mode == 6 || g[i].mode == 7 || g[i].mode == 8) && !bl5) bl5 = ws_surface_new(tmp->w, tmp->h); }
+	for (int i = 0; i < n; i++) if (g[i].mode == 9 && !bl9) bl9 = ws_surface_new(tmp->w, tmp->h);
 	fx_off++;
 	if (bl) { memcpy(bl->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl, (ws_rect){ 0, 0, bl->w, bl->h }, (ws_rect){ 0, 0, bl->w, bl->h }, 30.0f); }
 	if (bl5) { memcpy(bl5->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl5, (ws_rect){ 0, 0, bl5->w, bl5->h }, (ws_rect){ 0, 0, bl5->w, bl5->h }, 7.0f); }
+	if (bl9) { memcpy(bl9->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl9, (ws_rect){ 0, 0, bl9->w, bl9->h }, (ws_rect){ 0, 0, bl9->w, bl9->h }, 14.0f); }       /* the regular glass of macOS 26: one wide blur (the fits of Solarium docs/ALGORITHM-BACKGROUND.md: block radius 46-60, LOD 5.6-5.9, sigma about 14) */
 	fx_off--;
 	int x0 = bx0 < 0 ? 0 : bx0, y0 = by0 < 0 ? 0 : by0, x1 = bx1 > img->w ? img->w : bx1, y1 = by1 > img->h ? img->h : by1;
 	/* a single regular / clear shape: the part of it that lies deeper than 26 px (and than the corner radius) inside is the backdrop tinted, whatever the edge does; found without the distance field */
@@ -230,6 +232,21 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 			for (int k = 0; k < 3; k++) { float o = f + 1.091f * (c[k] - L); o = clampf(o, 0, 1); o = o * (1 - rim) + rim; if (mode == 7 && dd < 1.0f) o *= 0.53f; dp[2 - k] = (uint8_t)(dp[2 - k] * (1 - cover) + o * 255.0f * cover + 0.5f); }
 			continue;
 		}
+		if (mode == 9 && bl9) {                                                                          /* regular Liquid Glass (macOS 26, GlassBackgroundFilter as set by NSGlassEffectView: Solarium docs/REAL-GLASS-VALUES.md): the backdrop blurred wide, pulled from inside at the rim by the inner refraction (amount -60 over 20 px, a quarter circle), a light tone, a faint rim; the face colour term is off in the fits */
+			int bxp = x - cx0, byp = y - cy0; if (bxp < 0 || byp < 0 || bxp >= bl9->w || byp >= bl9->h) continue;
+			float dd = -sdf; if (dd < 0) dd = 0;
+			int dm; float gx = glass_field(g, n, ox, oy, fx + 1, fy, &dm) - glass_field(g, n, ox, oy, fx - 1, fy, &dm), gy = glass_field(g, n, ox, oy, fx, fy + 1, &dm) - glass_field(g, n, ox, oy, fx, fy - 1, &dm);
+			float gl = sqrtf(gx * gx + gy * gy), nxo = gl > 1e-4f ? gx / gl : 0, nyo = gl > 1e-4f ? gy / gl : -1;
+			float t = clampf(dd / 20.0f, 0, 1), prof = 1.0f - sqrtf(t * (2.0f - t)), s = -60.0f * 0.7f * gi * prof;
+			float s3[3]; sample_bilinear(bl9, (fx + nxo * s) - cx0, (fy + nyo * s) - cy0, s3);
+			float c[3] = { s3[2], s3[1], s3[0] }, L = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+			static int dark = -1; if (dark < 0) { const char *ap = getenv("WSD_APPEARANCE"); dark = ap && !strcmp(ap, "dark"); }
+			float light = nxo * -0.55f + nyo * -0.83f; if (light < 0) light = 0;
+			float rim = expf(-dd / 1.4f) * (0.10f + 0.35f * light) + expf(-dd / 6.0f) * 0.05f * light;
+			uint8_t *dp = img->px + (size_t)y * img->stride + (size_t)x * 4;
+			for (int k = 0; k < 3; k++) { float o = L + (c[k] - L) * 1.3f; o = dark ? o * 0.80f + 0.03f : o * 0.84f + 0.16f; o = clampf(o, 0, 1); o = o * (1 - rim) + rim; dp[2 - k] = (uint8_t)(dp[2 - k] * (1 - cover) + o * 255.0f * cover + 0.5f); }
+			continue;
+		}
 		if (mode >= 3 && mode < 5 && bl) {                                                               /* Mica: Menu.caar of Aqua.car / DarkAqua.car: a backdrop (gaussian blur 30, saturate), the fill colour over it, the tone layer in darken (light) or lighten (dark) blend */
 			int bxp = x - cx0, byp = y - cy0; if (bxp < 0 || byp < 0 || bxp >= bl->w || byp >= bl->h) continue;
 			const uint8_t *bp = bl->px + (size_t)byp * bl->stride + (size_t)bxp * 4; int dark = mode == 4;
@@ -259,7 +276,7 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 		uint8_t *dp = img->px + (size_t)y * img->stride + (size_t)x * 4;
 		for (int c = 0; c < 3; c++) dp[c] = (uint8_t)(dp[c] * (1 - cover) + col[c] * 255.0f * cover + 0.5f);
 	}
-	ws_surface_free(tmp); if (bl) ws_surface_free(bl); if (bl5) ws_surface_free(bl5);
+	ws_surface_free(tmp); if (bl) ws_surface_free(bl); if (bl5) ws_surface_free(bl5); if (bl9) ws_surface_free(bl9);
 	if (ox1 > ox0 && oy1 > oy0) fx_store(img, gkey, ghash, ox0, oy0, ox1, oy1);
 }
 
