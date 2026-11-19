@@ -197,7 +197,7 @@ void ws_cursor_reveal(ws_server *, uint32_t cid);
  * (geometry, opacity, corner radius, pixels, shadow layer, damage since the last frame). */
 /* one glass shape: a rounded rectangle (window-relative) of a window and its style (1 regular, 2 clear; 0 = unused slot). A window has up to WS_GLASS_MAX shapes; the compositor melts the ones that touch */
 typedef struct { ws_rect rect; int radius, mode; } ws_glass;
-#define WS_GLASS_MAX 16
+#define WS_GLASS_MAX 32
 typedef struct {
 	ws_wid id;
 	ws_rect frame;
