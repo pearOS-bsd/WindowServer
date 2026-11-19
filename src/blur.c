@@ -124,7 +124,20 @@ void ws_blur_region(ws_surface *img, ws_rect r, ws_rect wr, float sigma)
 }
 
 /* tuning knobs of the regular glass (modes 9, 10), fitted on the captures of Solarium (calibration harness: see docs/GLASS-CALIBRATION.md); the environment overrides them for the fit */
-static float g9k(const char *name, float def) { const char *e = getenv(name); return e ? (float)atof(e) : def; }
+static int g9_dark(void) { static int d = -1; if (d < 0) { const char *ap = getenv("WSD_APPEARANCE"); d = ap && !strcmp(ap, "dark"); } return d; }
+/* a knob with a value for each appearance: the dark one is NAME, the light one NAME_L in the environment; defl < -1e8: the same default for both */
+static float g9a(const char *name, float def, float defl)
+{
+	char b[80]; snprintf(b, sizeof b, "%s%s", name, g9_dark() ? "" : "_L"); const char *e = getenv(b); if (e) return (float)atof(e);
+	if (g9_dark()) return def;
+	if (defl > -1e8f) return defl;
+	/* the light appearance, fitted on the captures of a real Mac in the light appearance (Solarium captures/27.0-arm64-light, 2026-11-19: glass-probe and cc-probe with the appearance Aqua) */
+	static const struct { const char *n; float v; } lt[] = { { "WS_G9_SIGMA", 12.63f }, { "WS_G9_SAT", 1.245f }, { "WS_G9_LGAIN", 1.3f }, { "WS_G9_LLIFT", 0.184f }, { "WS_G9_RING", 0.121f }, { "WS_G9_RINGW", 40.0f }, { "WS_G9_REFR", 1.0f }, { "WS_G9_RIM", 2.5f },
+		{ "WS_G10_SIGMA", 20.4f }, { "WS_G10_SAT", 1.4f }, { "WS_G10_LGAIN", 0.92f }, { "WS_G10_LLIFT", 0.23f }, { "WS_G10_RING", 0.134f }, { "WS_G10_RINGW", 20.4f }, { "WS_G10_RIM", 2.5f },
+		{ "WS_GS_SIGMA", 1.98f }, { "WS_G9_SMIX", 0.113f }, { "WS_G10_SMIX", 0.021f }, { "WS_GS_DEPTH", 5.6f }, { "WS_G9_SH", 0.167f } };
+	for (unsigned i = 0; i < sizeof lt / sizeof lt[0]; i++) if (!strcmp(name, lt[i].n)) return lt[i].v;
+	return def;
+}
 /* ---- the glass material ("Liquid Glass"), as measured on the real Dock over a high-contrast pattern: there is NO blur inside (lines and stripes stay crisp), the interior is the backdrop darkened to
  * about 0.69 (white -> 176), and the edge band (about 18 px) is a lens that PULLS content in from beyond the edge (a line 18 px outside the bar shows up right at its edge, bent), with a thin specular
  * rim lit from the top left. mode 1: regular, 2: clear (lighter tint, thinner lens) ---- */
@@ -209,9 +222,9 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 	fx_off++;
 	if (bl) { memcpy(bl->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl, (ws_rect){ 0, 0, bl->w, bl->h }, (ws_rect){ 0, 0, bl->w, bl->h }, 30.0f); }
 	if (bl5) { memcpy(bl5->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl5, (ws_rect){ 0, 0, bl5->w, bl5->h }, (ws_rect){ 0, 0, bl5->w, bl5->h }, 7.0f); }
-	if (bl9) { memcpy(bl9->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl9, (ws_rect){ 0, 0, bl9->w, bl9->h }, (ws_rect){ 0, 0, bl9->w, bl9->h }, g9k("WS_G9_SIGMA", 9.97f)); }       /* the regular glass of macOS 26: one wide blur (the fits of Solarium docs/ALGORITHM-BACKGROUND.md: block radius 46-60, LOD 5.6-5.9, sigma about 14) */
-	if (bl10) { memcpy(bl10->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl10, (ws_rect){ 0, 0, bl10->w, bl10->h }, (ws_rect){ 0, 0, bl10->w, bl10->h }, g9k("WS_G10_SIGMA", 24.0f)); }       /* the small shapes of a container: a narrower blur (the system sets smaller blur opacities and bleed for them) */
-	if (bls) { memcpy(bls->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bls, (ws_rect){ 0, 0, bls->w, bls->h }, (ws_rect){ 0, 0, bls->w, bls->h }, g9k("WS_GS_SIGMA", 3.93f)); }       /* the narrow blur that the pattern shows through (the real glass keeps the backdrop readable at the centre: the blur opacities of the filter mix a near and a far blur) */
+	if (bl9) { memcpy(bl9->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl9, (ws_rect){ 0, 0, bl9->w, bl9->h }, (ws_rect){ 0, 0, bl9->w, bl9->h }, g9a("WS_G9_SIGMA", 9.97f, -1e9f)); }       /* the regular glass of macOS 26: one wide blur (the fits of Solarium docs/ALGORITHM-BACKGROUND.md: block radius 46-60, LOD 5.6-5.9, sigma about 14) */
+	if (bl10) { memcpy(bl10->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bl10, (ws_rect){ 0, 0, bl10->w, bl10->h }, (ws_rect){ 0, 0, bl10->w, bl10->h }, g9a("WS_G10_SIGMA", 24.0f, -1e9f)); }       /* the small shapes of a container: a narrower blur (the system sets smaller blur opacities and bleed for them) */
+	if (bls) { memcpy(bls->px, tmp->px, (size_t)tmp->stride * tmp->h); ws_blur_region(bls, (ws_rect){ 0, 0, bls->w, bls->h }, (ws_rect){ 0, 0, bls->w, bls->h }, g9a("WS_GS_SIGMA", 3.93f, -1e9f)); }       /* the narrow blur that the pattern shows through (the real glass keeps the backdrop readable at the centre: the blur opacities of the filter mix a near and a far blur) */
 	fx_off--;
 	int x0 = bx0 < 0 ? 0 : bx0, y0 = by0 < 0 ? 0 : by0, x1 = bx1 > img->w ? img->w : bx1, y1 = by1 > img->h ? img->h : by1;
 	/* a single regular / clear shape: the part of it that lies deeper than 26 px (and than the corner radius) inside is the backdrop tinted, whatever the edge does; found without the distance field */
@@ -229,8 +242,8 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 		float cover = clampf(0.5f - sdf, 0, 1);
 		if (cover <= 0) {                   /* outside the glass: the shadow of the regular glass (glassBackground ShadowOpacity 0.6, ShadowRadius 24, ShadowOffset (0, 8)): the backdrop darkened by a gaussian-blurred copy of the shape moved down by the offset (an erfc edge, sigma radius / 2); under the glass itself it does not show */
 			if (sdf > 40.0f) continue;
-			int dm2; float sd2 = glass_field(g, n, ox, oy, fx, fy - g9k("WS_G9_SHOFF", 8.0f), &dm2); if (dm2 != 9 && dm2 != 10) continue;
-			float strength = g9k("WS_G9_SH", 0.2f) * (dm2 == 10 ? g9k("WS_G10_SHK", 0.6f) : 1.0f) * 0.5f * erfcf(sd2 / (1.41421356f * g9k("WS_G9_SHSIG", 12.0f))); if (strength < 0.004f) continue;
+			int dm2; float sd2 = glass_field(g, n, ox, oy, fx, fy - g9a("WS_G9_SHOFF", 8.0f, -1e9f), &dm2); if (dm2 != 9 && dm2 != 10) continue;
+			float strength = g9a("WS_G9_SH", 0.2f, -1e9f) * (dm2 == 10 ? g9a("WS_G10_SHK", 0.6f, -1e9f) : 1.0f) * 0.5f * erfcf(sd2 / (1.41421356f * g9a("WS_G9_SHSIG", 12.0f, -1e9f))); if (strength < 0.004f) continue;
 			uint8_t *dp = img->px + (size_t)y * img->stride + (size_t)x * 4; float k = 1.0f - strength;
 			dp[0] = (uint8_t)(dp[0] * k + 0.5f); dp[1] = (uint8_t)(dp[1] * k + 0.5f); dp[2] = (uint8_t)(dp[2] * k + 0.5f);
 			continue;
@@ -261,17 +274,17 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 			int dm; float gx = glass_field(g, n, ox, oy, fx + 1, fy, &dm) - glass_field(g, n, ox, oy, fx - 1, fy, &dm), gy = glass_field(g, n, ox, oy, fx, fy + 1, &dm) - glass_field(g, n, ox, oy, fx, fy - 1, &dm);
 			float gl = sqrtf(gx * gx + gy * gy), nxo = gl > 1e-4f ? gx / gl : 0, nyo = gl > 1e-4f ? gy / gl : -1;
 			int m10 = mode == 10;
-			float t = clampf(dd / g9k("WS_G9_RH", 19.8f), 0, 1), prof = 1.0f - sqrtf(t * (2.0f - t)), s = -60.0f * g9k("WS_G9_REFR", 0.87f) * gi * prof;
+			float t = clampf(dd / g9a("WS_G9_RH", 19.8f, -1e9f), 0, 1), prof = 1.0f - sqrtf(t * (2.0f - t)), s = -60.0f * g9a("WS_G9_REFR", 0.87f, -1e9f) * gi * prof;
 			float s3[3], s4[3]; sample_bilinear(blq, (fx + nxo * s) - cx0, (fy + nyo * s) - cy0, s3); sample_bilinear(bls, (fx + nxo * s) - cx0, (fy + nyo * s) - cy0, s4);
-			float smix = clampf(g9k(m10 ? "WS_G10_SMIX" : "WS_G9_SMIX", m10 ? 0.48f : 0.18f) * clampf(dd / g9k("WS_GS_DEPTH", 10.3f), 0, 1), 0, 1); for (int k = 0; k < 3; k++) s3[k] = s3[k] * (1 - smix) + s4[k] * smix;
+			float smix = clampf(g9a(m10 ? "WS_G10_SMIX" : "WS_G9_SMIX", m10 ? 0.48f : 0.18f, -1e9f) * clampf(dd / g9a("WS_GS_DEPTH", 10.3f, -1e9f), 0, 1), 0, 1); for (int k = 0; k < 3; k++) s3[k] = s3[k] * (1 - smix) + s4[k] * smix;
 			float c[3] = { s3[2], s3[1], s3[0] }, L = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
 			static int dark = -1; if (dark < 0) { const char *ap = getenv("WSD_APPEARANCE"); dark = ap && !strcmp(ap, "dark"); }
 			/* the lit rim: CASDFKeyFillHighlightEffect as NSGlassEffectView sets it (key light at angle 0, fill light at angle pi, spread pi / 2, amount 0.5 each, height 1) */
 			float kl = nxo * 1.0f, fl = -nxo * 1.0f; kl = kl < 0 ? 0 : kl; fl = fl < 0 ? 0 : fl;
-			float lit = 0.5f * kl + 0.5f * fl, top = nyo < 0 ? -nyo : 0, rs = g9k(m10 ? "WS_G10_RIM" : "WS_G9_RIM", m10 ? 0.31f : 1.2f);
+			float lit = 0.5f * kl + 0.5f * fl, top = nyo < 0 ? -nyo : 0, rs = g9a(m10 ? "WS_G10_RIM" : "WS_G9_RIM", m10 ? 0.31f : 1.2f, -1e9f);
 			float rim = rs * (expf(-dd / 1.3f) * (0.10f + 0.40f * lit + 0.12f * top) + expf(-dd / 7.0f) * 0.05f * (lit + top));
-			float sat = g9k(m10 ? "WS_G10_SAT" : "WS_G9_SAT", m10 ? 1.43f : 1.3f), gain = dark ? g9k(mode == 10 ? "WS_G10_DGAIN" : "WS_G9_DGAIN", mode == 10 ? 0.78f : 0.88f) : g9k(mode == 10 ? "WS_G10_LGAIN" : "WS_G9_LGAIN", mode == 10 ? 0.80f : 0.84f), lift = dark ? g9k(mode == 10 ? "WS_G10_DLIFT" : "WS_G9_DLIFT", mode == 10 ? 0.131f : 0.058f) : g9k(mode == 10 ? "WS_G10_LLIFT" : "WS_G9_LLIFT", mode == 10 ? 0.20f : 0.16f);
-			float ring = g9k(m10 ? "WS_G10_RING" : "WS_G9_RING", m10 ? 0.028f : 0.177f) * expf(-dd / g9k(m10 ? "WS_G10_RINGW" : "WS_G9_RINGW", m10 ? 2.3f : 40.0f));          /* a darker band inside the rim (the bleed / blur-fill terms of the real filter) */
+			float sat = g9a(m10 ? "WS_G10_SAT" : "WS_G9_SAT", m10 ? 1.43f : 1.3f, -1e9f), gain = dark ? g9a(mode == 10 ? "WS_G10_DGAIN" : "WS_G9_DGAIN", mode == 10 ? 0.78f : 0.88f, -1e9f) : g9a(mode == 10 ? "WS_G10_LGAIN" : "WS_G9_LGAIN", mode == 10 ? 0.80f : 0.84f, -1e9f), lift = dark ? g9a(mode == 10 ? "WS_G10_DLIFT" : "WS_G9_DLIFT", mode == 10 ? 0.131f : 0.058f, -1e9f) : g9a(mode == 10 ? "WS_G10_LLIFT" : "WS_G9_LLIFT", mode == 10 ? 0.20f : 0.16f, -1e9f);
+			float ring = g9a(m10 ? "WS_G10_RING" : "WS_G9_RING", m10 ? 0.028f : 0.177f, -1e9f) * expf(-dd / g9a(m10 ? "WS_G10_RINGW" : "WS_G9_RINGW", m10 ? 2.3f : 40.0f, -1e9f));          /* a darker band inside the rim (the bleed / blur-fill terms of the real filter) */
 			uint8_t *dp = img->px + (size_t)y * img->stride + (size_t)x * 4;
 			for (int k = 0; k < 3; k++) { float o = L + (c[k] - L) * sat; o = o * gain + lift; o = o * (1.0f - ring); o = clampf(o, 0, 1); o = o * (1 - rim) + rim; dp[2 - k] = (uint8_t)(dp[2 - k] * (1 - cover) + o * 255.0f * cover + 0.5f); }
 			continue;
