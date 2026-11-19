@@ -10,6 +10,8 @@ void ca_set_ool_loader(ca_ool_fn fn, void *ctx);	/* default: files in the direct
 void ca_reset(void);
 int ca_feed(const uint8_t *msg, size_t n);		/* one commit message (as the render server received it, from the header on); returns the scene (one for each context) it went to, -1 if not understood */
 int ca_feed_key(uint32_t key, const uint8_t *msg, size_t n);	/* the same, with the key of the scene given (the pid of the client) */
+typedef struct { int x, y, w, h, radius, mode; } ca_glass;	/* a glass shape: a rounded rectangle in the window (top left origin), mode 1 regular */
+int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max);	/* the CASDFElementLayers of a root, for the glass of its window */
 int ca_nscenes(void);
 int ca_scene_nroots(int scene);			/* the render contexts of a scene that have a root layer */
 uint32_t ca_scene_root_ctx(int scene, int i);	/* the context id of the i-th root */

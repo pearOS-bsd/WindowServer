@@ -34,6 +34,8 @@ typedef struct {
 	int any_col;
 	uint64_t subs[MAXS]; int nsubs;
 	uint64_t img;		/* id of the Image object, 0: none */
+	char cls;			/* the class of the layer by its class object: 0 plain, 'E' CASDFElementLayer (0x2f), 'S' CASDFLayer (0x30), 'B' CABackdropLayer (3) */
+	float cr;			/* cornerRadius (the record of a layer with an extension block) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
 #define MAXSCENES 16
@@ -73,7 +75,7 @@ static void setimg(uint64_t id, img_t *im) { for (int i = 0; i < nIM; i++) if (I
 static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) return &IM[i].im; return NULL; }
 
 /* ---- decoder ---- */
-typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[32], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -156,9 +158,12 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0x1f: u32(r); u32(r); u8(r); break;
 	/* the formats below come from the decompilation of QuartzCore (CA::Render::<Class>::<Class>(Decoder*), REA/Ghidra) */
 	case 3: {		/* BackdropLayer: Object flags, vm_size_t, String, 4 x i32, 0x20 bytes, i32, 0x20 bytes, i8 enum */
+		if (ct) ct->cls = 'B';
 		u32(r); u64(r); skip_obj(r, depth + 1, NULL);
 		for (int i = 0; i < 4; i++) u32(r);
 		raw(r, 0x20); u32(r); raw(r, 0x20); u8(r); break; }
+	case 0x2f: u32(r); u8(r); u8(r); u32(r); u32(r); u32(r); u8(r); if (ct) ct->cls = 'E'; break;		/* SDFElementLayer: Object flags, i8 mode, i8 operation, i32 contentsZeroValueDistance, i32 contentsOneValueDistance, i32 gradientOvalization, i8 hitTestsAsFill (Solarium docs/RENDER-STREAM.md) */
+	case 0x30: u32(r); raw(r, 0x70); if (ct) ct->cls = 'S'; break;		/* SDFLayer: Object flags, 0x70 bytes of effect parameters */
 	case 0x40: u32(r); u64(r); skip_cf(r, 0); u8(r); break;		/* SeparatedOptions: i32, i64, a CF dictionary, i8 */
 	case 7: u32(r); break;		/* Object (QuartzCore decode_object: a bare Object: its flags) */
 	case 0x14: {		/* GradientLayer: Object flags, Gradient (vm_size_t n, i32 width = 5, i32 flags, n*5*4 bytes, locations n*4 if flags & 2, interpolations n*0x20-0x20 if flags & 4), 2 x 2 cgfloats, 2 x 2 cgfloats, atom, i32, a texture object if Object flags bit 11, colorspace */
@@ -212,15 +217,16 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	}
 	{
 	uint8_t ext = u8(r);
+	contents_t cls0; memset(&cls0, 0, sizeof cls0);
 	if (ext) {
-		for (int i = 0; i < 1 + 6 + 1 + 4; i++) skip_obj(r, depth + 1, NULL);
+		for (int i = 0; i < 1 + 6 + 1 + 4; i++) skip_obj(r, depth + 1, i == 0 ? &cls0 : NULL);
 		skip_arr(r, depth, NULL, NULL); skip_arr(r, depth, NULL, NULL);
 		for (int i = 0; i < 3; i++) skip_obj(r, depth + 1, NULL);
 		skip_arr(r, depth, NULL, NULL);
 		skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL);
 		skip_arr(r, depth, NULL, NULL);
 		raw(r, 16); raw(r, 16); u64(r); u64(r); raw(r, 0x14); raw(r, 8);
-		for (int i = 0; i < 4; i++) u32(r);
+		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; } } } u32(r); u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); u32(r); u64(r); skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL); u8(r);
@@ -250,6 +256,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 		if (ool0 == NULL) return;
 	}
 	rd r = ool0 ? (rd){ ool0, osz, 0, 0 } : (rd){ m + st, n - st, 0, 0 };
+	if (getenv("CA_DUMP")) { static int nd; char nm[64]; snprintf(nm, sizeof nm, "%s/ca-stream-%03d.bin", getenv("CA_DUMP"), nd++); FILE *df = fopen(nm, "wb"); if (df) { fwrite(r.b, 1, r.n, df); fclose(df); } }       /* a debugging aid: every command stream into a file */
 	u32(&r); uint32_t msg_ctx = u32(&r); u64(&r);
 	while (!r.err && r.p < r.n) {
 		uint8_t op = u8(&r);
@@ -265,7 +272,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 				for (q = start + 1; q + 14 <= r.n; q++)
 					if (r.b[q] == 0x02 && r.b[q + 11] == 0 && r.b[q + 12] == 0 && r.b[q + 13] == 0x1e) break;
 				if (q + 14 > r.n) break;
-				if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: record at %zu failed at %zu (id %llx), next record at %zu of %zu\n", start, r.p, (unsigned long long)id, q, r.n);
+				if (getenv("CA_DEBUG")) { fprintf(stderr, "ca_scene: record at %zu failed at %zu (id %llx), next record at %zu of %zu; type %02x; bytes:", start, r.p, (unsigned long long)id, q, r.n, start + 13 < r.n ? r.b[start + 13] : 0); for (size_t z = start; z < start + 80 && z < r.n; z++) fprintf(stderr, " %02x", r.b[z]); fprintf(stderr, "\n"); }
 				r.err = 0; r.p = q; skipped++;
 			}
 		}
@@ -415,6 +422,19 @@ static void paint_scene(ca_canvas *win)
 		if (b->w * b->h > a->w * a->h) { uint64_t t = roots[i]; roots[i] = roots[k]; roots[k] = t; }
 	}
 	for (int i = 0; i < nr; i++) paint_layer(win, roots[i], 0, 0, 1.0, 0);
+}
+/* The glass of a context: the rectangles of the CASDFElementLayers (the shapes of the Liquid Glass of macOS 26: NSGlassEffectView / SwiftUI glassEffect put them under a CABackdropLayer with the glassBackground filter), in the window of the context (origin at the top left), with their corner radius. */
+static void glass_walk(uint64_t id, double ox, double oy, int H, ca_glass *out, int max, int *n, int depth)
+{
+	layer_t *l = find(id); if (!l || depth > 64) return;
+	double x = ox + l->px_ - l->w / 2, y = oy + l->py_ - l->h / 2;
+	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = 1; (*n)++; }
+	for (int i = 0; i < l->nsubs; i++) glass_walk(l->subs[i], x, y, H, out, max, n, depth + 1);
+}
+int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
+{
+	int n = 0; if (scene < 0 || scene >= nscenes || root < 0 || root >= scenes[scene]->nroots) return 0;
+	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, height, out, max, &n, 0); return n;
 }
 int ca_scene_nroots(int scene) { return scene >= 0 && scene < nscenes ? scenes[scene]->nroots : 0; }
 uint32_t ca_scene_root_ctx(int scene, int i) { return scene >= 0 && scene < nscenes && i >= 0 && i < scenes[scene]->nroots ? scenes[scene]->rootctx[i] : 0; }
