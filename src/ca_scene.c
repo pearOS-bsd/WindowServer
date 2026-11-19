@@ -428,7 +428,7 @@ static void glass_walk(uint64_t id, double ox, double oy, int H, ca_glass *out, 
 {
 	layer_t *l = find(id); if (!l || depth > 64) return;
 	double x = ox + l->px_ - l->w / 2, y = oy + l->py_ - l->h / 2;
-	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = 9; (*n)++; }
+	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9; (*n)++; }
 	for (int i = 0; i < l->nsubs; i++) glass_walk(l->subs[i], x, y, H, out, max, n, depth + 1);
 }
 int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
