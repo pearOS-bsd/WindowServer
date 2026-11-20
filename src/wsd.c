@@ -1395,6 +1395,8 @@ int main(int argc, char **argv)
 #ifdef WS_GL
 		glc = glc_create(render_node, w, h);
 		if (glc) fprintf(stderr, "WindowServer: GL compositor: %s\n", glc_describe(glc));
+		if (glc && strstr(glc_describe(glc), "llvmpipe") && !getenv("WSD_FORCE_GL")) {		/* the GL of the CPU: it composes slower than the software compositor of ours (3 frames a second with the glass of a panel at 1080 p against 8 to 10) */
+			fprintf(stderr, "WindowServer: the GL renderer is llvmpipe (the CPU): using the software compositor (WSD_FORCE_GL=1 keeps GL)\n"); glc_destroy(glc); glc = NULL; }
 		else fprintf(stderr, "WindowServer: GL compositor unavailable (EGL/GLES2 could not be initialised), using the software compositor\n");
 #else
 		fprintf(stderr, "WindowServer: built without GL (use gmake gl on FreeBSD), using the software compositor\n");
