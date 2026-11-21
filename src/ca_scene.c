@@ -436,6 +436,17 @@ int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
 	int n = 0; if (scene < 0 || scene >= nscenes || root < 0 || root >= scenes[scene]->nroots) return 0;
 	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, height, out, max, &n, 0); return n;
 }
+
+/* position and size of the root layer of a root of a scene (the content of the window that its context is bound to: the layer's position is the window's origin in the coordinates of the screen's top-left corner, as far as known) */
+int ca_scene_root_geom(int scene, int i, double *x, double *y, double *w, double *h)
+{
+	layer_t *l;
+	if (scene < 0 || scene >= nscenes || i < 0 || i >= scenes[scene]->nroots) return 0;
+	S = scenes[scene];
+	if ((l = find(S->rootid[i])) == NULL) return 0;
+	*x = l->px_; *y = l->py_; *w = l->w; *h = l->h;
+	return 1;
+}
 int ca_scene_nroots(int scene) { return scene >= 0 && scene < nscenes ? scenes[scene]->nroots : 0; }
 uint32_t ca_scene_root_ctx(int scene, int i) { return scene >= 0 && scene < nscenes && i >= 0 && i < scenes[scene]->nroots ? scenes[scene]->rootctx[i] : 0; }
 /* the tree of one context (its root layer) on a transparent canvas: the content of the window of that context */

@@ -13,6 +13,7 @@ int ca_feed_key(uint32_t key, const uint8_t *msg, size_t n);	/* the same, with t
 typedef struct { int x, y, w, h, radius, mode; } ca_glass;	/* a glass shape: a rounded rectangle in the window (top left origin), mode 1 regular */
 int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max);	/* the CASDFElementLayers of a root, for the glass of its window */
 int ca_nscenes(void);
+int ca_scene_root_geom(int scene, int root, double *x, double *y, double *w, double *h);	/* position / size of the root layer */
 int ca_scene_nroots(int scene);			/* the render contexts of a scene that have a root layer */
 uint32_t ca_scene_root_ctx(int scene, int i);	/* the context id of the i-th root */
 void ca_paint_root(int scene, int i, uint8_t *bgra, int w, int h, int stride);	/* the tree of one context on a transparent canvas */
