@@ -250,7 +250,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 	}
 	uint32_t mid; memcpy(&mid, m + 0x14, 4);
 	uint8_t *ool0 = NULL; size_t osz = 0;
-	if (mid == 0x9c43 && (bits & 0x80000000u) && n_ool >= 1 && cur_ool_msg >= 0) {	/* a large commit: its command stream is the first out-of-line descriptor, the images follow */
+	if ((mid == 0x9c43 || mid == 0x9c45) && (bits & 0x80000000u) && n_ool >= 1 && cur_ool_msg >= 0) {	/* a large commit: its command stream is the first out-of-line descriptor, the images follow */
 		ool0 = ool_loader(ool_ctx, cur_ool_msg, ool_desc[0], &osz); ool_taken = 1;
 		if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: large commit %d: stream %zu bytes (%s), %d out-of-line descriptors\n", cur_ool_msg, osz, ool0 ? "loaded" : "NOT LOADED", n_ool);
 		if (ool0 == NULL) return;
