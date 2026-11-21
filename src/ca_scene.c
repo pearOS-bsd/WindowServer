@@ -258,8 +258,10 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 	rd r = ool0 ? (rd){ ool0, osz, 0, 0 } : (rd){ m + st, n - st, 0, 0 };
 	if (getenv("CA_DUMP")) { static int nd; char nm[64]; snprintf(nm, sizeof nm, "%s/ca-stream-%03d.bin", getenv("CA_DUMP"), nd++); FILE *df = fopen(nm, "wb"); if (df) { fwrite(r.b, 1, r.n, df); fclose(df); } }       /* a debugging aid: every command stream into a file */
 	u32(&r); uint32_t msg_ctx = u32(&r); u64(&r);
+	if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: commit of context %u: %zu stream bytes\n", (unsigned)msg_ctx, r.n);
 	while (!r.err && r.p < r.n) {
 		uint8_t op = u8(&r);
+		if (getenv("CA_DEBUG") && getenv("CA_DEBUG")[0] == '2') fprintf(stderr, "ca_scene:   ctx %u op %#x at %zu\n", (unsigned)msg_ctx, op, r.p - 1);
 		if (op == 0) break;
 		else if (op == 1) { uint64_t id = u64(&r); u32(&r); layer_t *l = find(id); if (l) l->used = 0; }
 		else if (op == 2) {
@@ -278,6 +280,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 		}
 		else if (op == 7) {			/* the root layer of the context */
 			uint64_t rid = u64(&r); int k;
+			if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: context %u: root layer %llx\n", (unsigned)msg_ctx, (unsigned long long)rid);
 			for (k = 0; k < S->nroots; k++) if (S->rootctx[k] == msg_ctx) break;
 			if (k < MAXROOTS) { S->rootctx[k] = msg_ctx; S->rootid[k] = rid; if (k == S->nroots) S->nroots++; }
 		}
