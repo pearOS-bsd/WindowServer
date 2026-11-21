@@ -1122,8 +1122,14 @@ void wsd_datagram_push(conn *c, uint32_t kind, const void *payload, uint32_t n)
 	}
 }
 
+
+/* The first stream that the SkyLight of the Mac takes with GetPortStreamOutofline (captured on a Mac with SwiftUI/tools/msgtrace.c, the first pull of a plain AppKit program): a notification record (kind 1, 36 bytes: 0x4b1 = 1201 with the Dock
+ * rectangle and two numbers) and a CGEvent record (kind 0, 416 bytes: an AppKit-defined event).  A real AppKit program waits for it before it orders its windows (SLSTransactionCommit). */
+static const uint8_t first_note[36] = {177,4,0,0,53,28,0,0,0,0,0,0,0,0,8,66,0,64,54,68,0,128,151,68,0,0,142,66,5,0,0,0,2,0,0,0};
+static const uint8_t first_event[416] = {0,0,0,3,53,64,1,0,3,0,0,0,54,64,1,0,0,0,0,0,55,64,1,0,13,0,0,0,56,192,2,0,0,0,0,0,0,0,0,0,57,192,2,0,0,0,0,0,0,0,0,0,58,0,1,0,108,138,232,156,65,68,0,0,59,64,1,0,64,0,0,0,51,64,1,0,0,0,0,0,52,64,1,0,163,150,5,0,41,64,1,0,0,0,0,0,43,64,1,0,0,0,0,0,44,64,1,0,0,0,0,0,101,64,1,0,0,0,0,0,42,0,1,0,0,0,0,0,0,0,0,0,45,64,1,0,0,0,0,0,102,64,1,0,0,0,0,0,103,64,1,0,0,0,0,0,104,64,1,0,0,0,0,0,87,0,1,0,0,0,0,0,0,0,0,0,40,64,1,0,158,50,0,0,39,64,2,0,76,192,4,0,0,0,0,0,85,64,1,0,163,150,5,0,105,64,1,0,0,0,0,0,106,64,1,0,0,0,0,0,107,64,1,0,32,3,0,0,174,16,112,0,0,0,0,3,0,0,1,0,108,138,232,156,65,68,0,0,3,64,1,0,64,0,0,0,4,64,1,0,163,150,5,0,15,64,1,0,13,0,0,0,16,0,1,0,1,0,0,0,0,0,0,0,17,0,1,0,158,50,0,0,254,140,0,0,18,0,1,0,158,50,0,0,254,140,0,0,13,16,32,0,233,66,208,65,37,25,159,213,43,210,241,224,165,141,84,144,74,163,59,59,220,117,3,76,9,202,36,152,85,136,57,165,83,64,1,0,1,0,0,0,84,64,15,0,45,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static int do_get_stream(conn *c, const uint8_t *buf, size_t len)
 {
+	if (c->mach && !c->first_stream) { c->first_stream = 1; wsd_datagram_push(c, 1, first_note, sizeof first_note); wsd_datagram_push(c, 0, first_event, sizeof first_event); }
 	const mach_msg_header_t *h = (const mach_msg_header_t *)buf;
 	(void)len;
 	uint8_t m[0x38]; memset(m, 0, sizeof m);
