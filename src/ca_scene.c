@@ -35,6 +35,7 @@ typedef struct {
 	uint64_t subs[MAXS]; int nsubs;
 	uint64_t img;		/* id of the Image object, 0: none */
 	char cls;			/* the class of the layer by its class object: 0 plain, 'E' CASDFElementLayer (0x2f), 'S' CASDFLayer (0x30), 'B' CABackdropLayer (3) */
+	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
@@ -200,7 +201,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	double d[6]; memcpy(d, pod + 0x28, sizeof d);
 	float col[5]; memcpy(col, pod, sizeof col);
 	if (d[4] > 0 && d[5] > 0) {		/* a record with geometry; a later record that only changes the contents (an implicit animation of "contents": ControlCenter updating its clock) carries a zero block and must not reset the layer */
-		l->px_ = d[0]; l->py_ = d[1]; l->w = d[4]; l->h = d[5];
+		l->px_ = d[0]; l->py_ = d[1]; l->w = d[4]; l->h = d[5]; memcpy(l->dd, d, sizeof d); memcpy(l->unk, pod + 0x14, 20);
 		memcpy(l->col, col, sizeof col);
 		l->any_col = col[0] != 0 || col[1] != 0 || col[2] != 0 || col[3] != 0 || col[4] != 0;
 	}
@@ -388,13 +389,18 @@ static void blend(ca_canvas *win, int x, int y, int r, int g, int b, int a)
 	if (a > 255) a = 255;
 	p[0] = (uint8_t)((p[0] * (255 - a) + b * a) / 255); p[1] = (uint8_t)((p[1] * (255 - a) + g * a) / 255); p[2] = (uint8_t)((p[2] * (255 - a) + r * a) / 255); p[3] = (uint8_t)(a + p[3] * (255 - a) / 255);
 }
-static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, double op, int depth)
+/* the geometry of a layer as CoreAnimation has it (CA::Render::Layer::compute_frame_offset, decompiled): position (dd[0], dd[1]), bounds origin (dd[2], dd[3]), bounds size (dd[4], dd[5]); the anchor point is (0, 0) when bit 0
+ * of the byte at offset 0x33 of the object (the high byte of unk[3]) is set, (0.5, 0.5) otherwise; the frame origin in the parent is position - (anchor * size + bounds origin), and the position of a child is in
+ * the bounds space of its parent (the origin of its bounds is the point of the parent's frame origin).  (A layer with an extension block can have another anchor point: not read yet.) */
+static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth)
 {
 	layer_t *l = find(id);
 	int H = win->h;
 	if (!l || depth > 64) return;
+	if (getenv("CA_PAINT_DEBUG") && l->nsubs >= 0)	fprintf(stderr, "ca_scene: tree depth %d layer %llx d=%g %g %g %g %g %g unk=%08x %08x %08x %08x %08x nsubs %d\n", depth, (unsigned long long)id, l->dd[0], l->dd[1], l->dd[2], l->dd[3], l->dd[4], l->dd[5], l->unk[0], l->unk[1], l->unk[2], l->unk[3], l->unk[4], l->nsubs);
 	if (getenv("CA_PAINT_DEBUG") && depth <= 1) fprintf(stderr, "ca_scene: paint depth %d id %llx at %.1f,%.1f size %.1fx%.1f parent origin %.1f,%.1f nsubs %d\n", depth, (unsigned long long)id, l->px_, l->py_, l->w, l->h, ox, oy, l->nsubs);
-	double x = ox + l->px_ - l->w / 2, y = oy + l->py_ - l->h / 2, o = l->any_col ? l->col[4] : 1.0, a = l->any_col ? l->col[3] : 0.0;
+	double ax = (l->unk[3] >> 24) & 1 ? 0.0 : 0.5, fx = l->dd[0] - (ax * l->w + l->dd[2]), fy = l->dd[1] - (ax * l->h + l->dd[3]);
+	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby, o = l->any_col ? l->col[4] : 1.0, a = l->any_col ? l->col[3] : 0.0;
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
 		int bx = (int)x, by = (int)(H - (y + l->h)), iw = (int)l->w, ih = (int)l->h;
@@ -423,7 +429,7 @@ static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, doubl
 				blend(win, bx + i, by + j, r, g, b, (int)(al * op2));
 			}
 	}
-	for (int i = 0; i < l->nsubs; i++) paint_layer(win, l->subs[i], x, y, op2 > 0 ? op2 : op, depth + 1);
+	for (int i = 0; i < l->nsubs; i++) paint_layer(win, l->subs[i], x, y, l->dd[2], l->dd[3], op2 > 0 ? op2 : op, depth + 1);
 }
 static void paint_scene(ca_canvas *win)
 {
@@ -438,7 +444,7 @@ static void paint_scene(ca_canvas *win)
 		layer_t *a = find(roots[i]), *b = find(roots[k]);
 		if (b->w * b->h > a->w * a->h) { uint64_t t = roots[i]; roots[i] = roots[k]; roots[k] = t; }
 	}
-	for (int i = 0; i < nr; i++) paint_layer(win, roots[i], 0, 0, 1.0, 0);
+	for (int i = 0; i < nr; i++) paint_layer(win, roots[i], 0, 0, 0, 0, 1.0, 0);
 }
 /* The glass of a context: the rectangles of the CASDFElementLayers (the shapes of the Liquid Glass of macOS 26: NSGlassEffectView / SwiftUI glassEffect put them under a CABackdropLayer with the glassBackground filter), in the window of the context (origin at the top left), with their corner radius. */
 static void glass_walk(uint64_t id, double ox, double oy, int H, ca_glass *out, int max, int *n, int depth)
@@ -478,7 +484,7 @@ void ca_paint_root(int scene, int i, uint8_t *bgra, int w_, int h_, int stride)
 		for (int i = 0; i < nL; i++) if (L[i].used) { if (L[i].w > 0 && L[i].h > 0) nsized++; if (L[i].any_col) { ncol++; if (L[i].col[3] > 0 && L[i].col[4] > 0) nvis++; } if (L[i].img) { nimg++; img_t *im = getimg(L[i].img); size_t nzb = 0; if (im && im->px) for (size_t q = 0; q < (size_t)im->stride * im->h; q++) if (im->px[q]) nzb++; fprintf(stderr, "ca_scene:   layer %llx cls %c %.0fx%.0f at %.0f,%.0f image %s %dx%d bpp %d stride %d, %zu non-zero bytes\n", (unsigned long long)L[i].id, L[i].cls ? L[i].cls : '-', L[i].w, L[i].h, L[i].px_, L[i].py_, im ? "found" : "MISSING", im ? im->w : 0, im ? im->h : 0, im ? im->bpp : 0, im ? im->stride : 0, nzb); } }
 		fprintf(stderr, "ca_scene: scene layers %d: %d sized, %d with a colour (%d visible), %d with an image\n", nL, nsized, ncol, nvis, nimg);
 	}
-	paint_layer(&cv, S->rootid[i], 0, 0, 1.0, 0);
+	paint_layer(&cv, S->rootid[i], 0, 0, 0, 0, 1.0, 0);
 }
 /* every scene over a dark background (opaque): for a viewer that shows the whole stream in one picture */
 void ca_paint(uint8_t *bgra, int w_, int h_, int stride)
