@@ -79,6 +79,7 @@ typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uin
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
+static int port_desc[256], n_port, port_taken;	/* the descriptors that are ports (the memory entries of shared pixels), in order */
 
 static void skip_obj(rd *r, int depth, contents_t *ct);
 static void skip_arr(rd *r, int depth, uint64_t *ids, int *nids)
@@ -144,7 +145,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0x1e: do_layer(r, depth, 0); break;		/* a layer inside an object: decoded, not kept */
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
 	case 0x3e: { uint32_t n = u32(r); raw(r, 8ULL * n); break; }
-	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); } break; }
+	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
 	case 0x12: { uint32_t fl = u32(r); if ((fl >> 8) & 1) skip_atom(r); else { { uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } } skip_atom(r); skip_obj(r, depth + 1, NULL); skip_arr(r, depth, NULL, NULL); } break; }
 	case 0x17: {
 		uint32_t flags_i = u32(r); uint8_t fmt = u8(r); uint8_t np = u8(r); uint32_t w = u32(r), h = u32(r); uint64_t row0 = 0;
@@ -207,7 +208,14 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	if (ct.kind) {
 		if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx contents: kind %d image %llx attached %d %dx%d bpp %d stride %d (ool %d taken %d of %d)\n", (unsigned long long)id, ct.kind, (unsigned long long)ct.imgid, ct.attached, ct.w, ct.h, ct.bpp, ct.stride, cur_ool_msg, ool_taken, n_ool);
 		l->img = ct.imgid;
-		if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
+		if (ct.kind == 1 && ct.attached == 2 && cur_ool_msg >= 0) {		/* shared memory: the next memory-entry port of the message that carender-stub could map */
+			uint8_t *px = NULL; size_t sz = 0;
+			while (px == NULL && port_taken < n_port) px = ool_loader(ool_ctx, cur_ool_msg, port_desc[port_taken++], &sz);
+			if (px) {
+				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
+				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * ct.bpp) setimg(ct.imgid, &im); else free(px);
+			}
+		} else if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
 			size_t sz = 0;
 			uint8_t *px = ool_loader(ool_ctx, cur_ool_msg, ool_desc[ool_taken++], &sz);
 			if (px) {
@@ -241,11 +249,11 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 	if (n < 0x1c) return;
 	uint32_t bits; memcpy(&bits, m, 4);
 	size_t st = 0x1c;
-	n_ool = 0; ool_taken = 0; cur_ool_msg = -1;
+	n_ool = 0; ool_taken = 0; cur_ool_msg = -1; n_port = 0; port_taken = 0;
 	if (bits & 0x80000000u) {
 		uint32_t nd; memcpy(&nd, m + 0x18, 4);
 		for (uint32_t i = 0; i < nd && st + 12 <= n; i++) {
-			if (st + 12 <= n && m[st + 11] == 1) { if (n_ool < 256) ool_desc[n_ool++] = (int)i; st += 16; } else st += 12;
+			if (st + 12 <= n && m[st + 11] == 1) { if (n_ool < 256) ool_desc[n_ool++] = (int)i; st += 16; } else { if (m[st + 11] == 0 && n_port < 256) port_desc[n_port++] = (int)i; st += 12; }
 		}
 		cur_ool_msg = (*nmsg)++;
 	}
@@ -394,12 +402,16 @@ static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, doubl
 			for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++)
 				blend(win, bx + i, by + j, (int)(l->col[0] * 255), (int)(l->col[1] * 255), (int)(l->col[2] * 255), (int)(a * op2 * 255));
 		img_t *im = l->img ? getimg(l->img) : NULL;
+		if (im && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: image of layer %llx painted at %d,%d size %dx%d opacity %.2f (canvas %dx%d, depth %d)\n", (unsigned long long)id, bx, by, iw, ih, op2, win->w, H, depth);
 		if (im && im->w > 0 && im->h > 0)
 			for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
 				int sx = (int)((i + 0.5) * im->w / iw), sy = (int)((j + 0.5) * im->h / ih), r, g, b, al;
 				if (sx >= im->w) sx = im->w - 1;
 				if (sy >= im->h) sy = im->h - 1;
-				if (im->bpp == 8) {
+				if (im->bpp == 1) {		/* an alpha-only image (the glyphs of CoreUI, format 80AL / A8): a mask, tinted with the colour of the layer (black when it has none) */
+					al = im->px[(size_t)sy * im->stride + sx];
+					r = l->any_col ? (int)(l->col[0] * 255) : 0; g = l->any_col ? (int)(l->col[1] * 255) : 0; b = l->any_col ? (int)(l->col[2] * 255) : 0;
+				} else if (im->bpp == 8) {
 					const uint16_t *s = (const uint16_t *)(im->px + (size_t)sy * im->stride) + (size_t)sx * 4;
 					float fr = half(s[0]), fg = half(s[1]), fb = half(s[2]), fa = half(s[3]);
 					#define CL(v) ((v) != (v) ? 0 : (v) < 0 ? 0 : (v) > 1 ? 255 : (int)((v) * 255))
