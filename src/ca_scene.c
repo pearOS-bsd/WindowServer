@@ -37,6 +37,7 @@ typedef struct {
 	char cls;			/* the class of the layer by its class object: 0 plain, 'E' CASDFElementLayer (0x2f), 'S' CASDFLayer (0x30), 'B' CABackdropLayer (3) */
 	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
 	double ccenter[4]; int has_ccenter;	/* contentsCenter: the Vector at index 6 of the extension block's objects (Layer::set_contents_center writes ext + 0x30) */
+	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
 } layer_t;
@@ -78,7 +79,7 @@ static void setimg(uint64_t id, img_t *im) { for (int i = 0; i < nIM; i++) if (I
 static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) return &IM[i].im; return NULL; }
 
 /* ---- decoder ---- */
-typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -111,6 +112,7 @@ static void skip_cf(rd *r, int depth)
 }
 static void do_layer(rd *r, int depth, uint64_t id);
 /* CA::Render::Texture::decode (the end of an Image): colorspace, i32, 4 x i16, shape, i32, i32, and 0x14 bytes when the Image flags say so (decompilation of QuartzCore) */
+static float tt_tint[4]; static int tt_has_tint;	/* the 5 floats at the end of an Image with flag 0x1000: (r, g, b, a, 0), the colour of an alpha-only image (white in the dark appearance, black in the light one) */
 static uint32_t tt_a, tt_b; static uint16_t tt_h[4];	/* what texture_tail read: the four 16-bit words and the last two 32-bit words (the size of a Surface) */
 static void texture_tail(rd *r, uint32_t image_flags)
 {
@@ -128,7 +130,8 @@ static void texture_tail(rd *r, uint32_t image_flags)
 		else if (n != 0 && n != -1) { if (n < 3 || n > 0x20000) { r->err = 1; return; } raw(r, (size_t)(n - 3) * 4); }
 	}
 	tt_a = u32(r); tt_b = u32(r);
-	if (image_flags & 0x1000) raw(r, 0x14);
+	tt_has_tint = 0;
+	if (image_flags & 0x1000) { const uint8_t *tp = raw(r, 0x14); if (tp) { memcpy(tt_tint, tp, 16); tt_has_tint = 1; } }
 }
 static void skip_obj_(rd *r, int depth, contents_t *ct);
 static void skip_obj(rd *r, int depth, contents_t *ct)
@@ -170,7 +173,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		if (u8(r)) { contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { ct->kind = 1; ct->attached = in.attached; } }
 		else { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) { ct->kind = 1; ct->attached = 1; } }
 		texture_tail(r, flags_i);
-		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = !w ? 4 : (row0 < 2ull * w ? 1 : (row0 < 6ull * w ? 4 : 8)); ct->stride = (int)row0;	/* the rows are padded (128 bytes for 33 BGRA pixels, 64 for 34 A8): the pixel size is told by how many row bytes a pixel has at least */ }
+		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = !w ? 4 : (row0 < 2ull * w ? 1 : (row0 < 6ull * w ? 4 : 8)); ct->has_tint = tt_has_tint; memcpy(ct->tint, tt_tint, 16); ct->stride = (int)row0;	/* the rows are padded (128 bytes for 33 BGRA pixels, 64 for 34 A8): the pixel size is told by how many row bytes a pixel has at least */ }
 		break; }
 	case 0x1f: u32(r); u32(r); u8(r); break;
 	/* the formats below come from the decompilation of QuartzCore (CA::Render::<Class>::<Class>(Decoder*), REA/Ghidra) */
@@ -225,7 +228,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	if (hassubs) { l->nsubs = ns; memcpy(l->subs, subs, sizeof(uint64_t) * ns); }
 	if (ct.kind) {
 		if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx contents: kind %d image %llx attached %d %dx%d bpp %d stride %d (ool %d taken %d of %d)\n", (unsigned long long)id, ct.kind, (unsigned long long)ct.imgid, ct.attached, ct.w, ct.h, ct.bpp, ct.stride, cur_ool_msg, ool_taken, n_ool);
-		l->img = ct.imgid;
+		l->img = ct.imgid; l->has_tint = ct.has_tint; memcpy(l->tint, ct.tint, 16);
 		if (ct.kind == 1 && ct.attached == 2 && cur_ool_msg >= 0) {		/* shared memory: the next memory-entry port of the message that carender-stub could map */
 			uint8_t *px = NULL; size_t sz = 0;
 			while (px == NULL && port_taken < n_port) px = ool_loader(ool_ctx, cur_ool_msg, port_desc[port_taken++], &sz);
@@ -454,6 +457,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 		}
 		img_t *im = l->img ? getimg(l->img) : NULL;
 		if (im && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: image of layer %llx painted at %d,%d size %dx%d opacity %.2f (canvas %dx%d, depth %d)\n", (unsigned long long)id, bx, by, iw, ih, op2, win->w, H, depth);
+		if (im && im->bpp == 1 && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: mask layer %llx %dx%d col %g %g %g %g %g any %d ext_cls %c\n", (unsigned long long)id, im->w, im->h, l->col[0], l->col[1], l->col[2], l->col[3], l->col[4], l->any_col, l->cls ? l->cls : '-');
 		if (im && l->has_ccenter && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: contentsCenter of layer %llx img %dx%d: %g %g %g %g\n", (unsigned long long)id, im->w, im->h, l->ccenter[0], l->ccenter[1], l->ccenter[2], l->ccenter[3]);
 		if (im && l->has_rects && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: rects of layer %llx img %dx%d: A %g %g %g %g  B %g %g %g %g\n", (unsigned long long)id, im->w, im->h, l->rectA[0], l->rectA[1], l->rectA[2], l->rectA[3], l->rectB[0], l->rectB[1], l->rectB[2], l->rectB[3]);
 		if (im && im->w > 0 && im->h > 0)
@@ -471,7 +475,8 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 				if (sy >= im->h) sy = im->h - 1;
 				if (im->bpp == 1) {		/* an alpha-only image (the glyphs of CoreUI, format 80AL / A8): a mask, tinted with the colour of the layer (black when it has none) */
 					al = im->px[(size_t)sy * im->stride + sx];
-					r = l->any_col ? (int)(l->col[0] * 255) : 0; g = l->any_col ? (int)(l->col[1] * 255) : 0; b = l->any_col ? (int)(l->col[2] * 255) : 0;
+					if (l->has_tint) { r = (int)(l->tint[0] * 255 + 0.5); g = (int)(l->tint[1] * 255 + 0.5); b = (int)(l->tint[2] * 255 + 0.5); if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255; al = (int)(al * (l->tint[3] > 1 ? 1 : l->tint[3])); }
+					else { r = l->any_col ? (int)(l->col[0] * 255) : 0; g = l->any_col ? (int)(l->col[1] * 255) : 0; b = l->any_col ? (int)(l->col[2] * 255) : 0; }
 				} else if (im->bpp == 2) {		/* grey + alpha (CoreUI GA8) */
 					const uint8_t *s = im->px + (size_t)sy * im->stride + (size_t)sx * 2;
 					r = g = b = s[0]; al = s[1];
