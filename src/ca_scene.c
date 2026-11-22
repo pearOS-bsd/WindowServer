@@ -429,9 +429,19 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
 		int bx = (int)x, by = (int)(H - (y + l->h)), iw = (int)l->w, ih = (int)l->h;
-		if (a > 0)
-			for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++)
-				blend(win, bx + i, by + j, (int)(l->col[0] * 255), (int)(l->col[1] * 255), (int)(l->col[2] * 255), (int)(a * op2 * 255));
+		if (a > 0) {
+			double cr = l->cr > 0 ? l->cr : 0, hm = (l->w < l->h ? l->w : l->h) / 2.0;	/* cornerRadius: the fill is a rounded rectangle (the radius is at most half the short side) */
+			if (cr > hm) cr = hm;
+			for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
+				double cov = 1.0;
+				if (cr > 0.5) {		/* distance of the pixel centre from the corner circle: a one pixel wide edge */
+					double px_ = i + 0.5, py_ = j + 0.5, cx_ = px_ < cr ? cr : (px_ > iw - cr ? iw - cr : px_), cy_ = py_ < cr ? cr : (py_ > ih - cr ? ih - cr : py_);
+					double dx_ = px_ - cx_, dy_ = py_ - cy_, d_ = dx_ * dx_ + dy_ * dy_;
+					if (d_ > 0) { double dist = __builtin_sqrt(d_) - cr + 0.5; cov = dist <= 0 ? 1.0 : (dist >= 1 ? 0.0 : 1.0 - dist); }
+				}
+				if (cov > 0) blend(win, bx + i, by + j, (int)(l->col[0] * 255), (int)(l->col[1] * 255), (int)(l->col[2] * 255), (int)(a * op2 * cov * 255));
+			}
+		}
 		img_t *im = l->img ? getimg(l->img) : NULL;
 		if (im && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: image of layer %llx painted at %d,%d size %dx%d opacity %.2f (canvas %dx%d, depth %d)\n", (unsigned long long)id, bx, by, iw, ih, op2, win->w, H, depth);
 		if (im && im->w > 0 && im->h > 0)
