@@ -36,6 +36,8 @@ typedef struct {
 	uint64_t img;		/* id of the Image object, 0: none */
 	char cls;			/* the class of the layer by its class object: 0 plain, 'E' CASDFElementLayer (0x2f), 'S' CASDFLayer (0x30), 'B' CABackdropLayer (3) */
 	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
+	double ccenter[4]; int has_ccenter;	/* contentsCenter: the Vector at index 6 of the extension block's objects (Layer::set_contents_center writes ext + 0x30) */
+	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
@@ -76,7 +78,7 @@ static void setimg(uint64_t id, img_t *im) { for (int i = 0; i < nIM; i++) if (I
 static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) return &IM[i].im; return NULL; }
 
 /* ---- decoder ---- */
-typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -146,7 +148,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0xfe: { uint64_t i = u64(r); u32(r); contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { *ct = in; ct->imgid = i; } break; }
 	case 0x1e: do_layer(r, depth, 0); break;		/* a layer inside an object: decoded, not kept */
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
-	case 0x3e: { uint32_t n = u32(r); raw(r, 8ULL * n); break; }
+	case 0x3e: { uint32_t n = u32(r); const uint8_t *vp = raw(r, 8ULL * n); if (ct && vp && n >= 4) { memcpy(ct->vec, vp, 32); ct->nvec = 4; } break; }		/* CA::Render::Vector: u32 count, then count doubles */
 	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
 	case 0x12: { uint32_t fl = u32(r); if ((fl >> 8) & 1) skip_atom(r); else { { uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } } skip_atom(r); skip_obj(r, depth + 1, NULL); skip_arr(r, depth, NULL, NULL); } break; }
 	case 0x53: {		/* CA::Render::Surface::encode (decompiled): the pixels of a CABackingStore, an IOSurface or a shared memory; see docs: SwiftUI/docs/EVIDENCE.md, 54th pass */
@@ -255,13 +257,16 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	uint8_t ext = u8(r);
 	contents_t cls0; memset(&cls0, 0, sizeof cls0);
 	if (ext) {
-		for (int i = 0; i < 1 + 6 + 1 + 4; i++) skip_obj(r, depth + 1, i == 0 ? &cls0 : NULL);
+		{ contents_t cc6; memset(&cc6, 0, sizeof cc6);
+		for (int i = 0; i < 1 + 6 + 1 + 4; i++) skip_obj(r, depth + 1, i == 0 ? &cls0 : (i == 6 ? &cc6 : NULL));
+		if (cc6.nvec == 4 && id && !r->err) { layer_t *lq = get(id); if (lq) { memcpy(lq->ccenter, cc6.vec, 32); lq->has_ccenter = 1; } } }
 		skip_arr(r, depth, NULL, NULL); skip_arr(r, depth, NULL, NULL);
 		for (int i = 0; i < 3; i++) skip_obj(r, depth + 1, NULL);
 		skip_arr(r, depth, NULL, NULL);
 		skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL);
 		skip_arr(r, depth, NULL, NULL);
-		raw(r, 16); raw(r, 16); u64(r); u64(r); raw(r, 0x14); raw(r, 8);
+		{ const uint8_t *ra = raw(r, 16), *rb = raw(r, 16); if (ra && rb && id && !r->err) { layer_t *lr = get(id); if (lr) { memcpy(lr->rectA, ra, 16); memcpy(lr->rectB, rb, 16); lr->has_rects = 1; } } }
+		u64(r); u64(r); raw(r, 0x14); raw(r, 8);
 		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; } } } u32(r); u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
@@ -449,9 +454,19 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 		}
 		img_t *im = l->img ? getimg(l->img) : NULL;
 		if (im && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: image of layer %llx painted at %d,%d size %dx%d opacity %.2f (canvas %dx%d, depth %d)\n", (unsigned long long)id, bx, by, iw, ih, op2, win->w, H, depth);
+		if (im && l->has_ccenter && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: contentsCenter of layer %llx img %dx%d: %g %g %g %g\n", (unsigned long long)id, im->w, im->h, l->ccenter[0], l->ccenter[1], l->ccenter[2], l->ccenter[3]);
+		if (im && l->has_rects && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: rects of layer %llx img %dx%d: A %g %g %g %g  B %g %g %g %g\n", (unsigned long long)id, im->w, im->h, l->rectA[0], l->rectA[1], l->rectA[2], l->rectA[3], l->rectB[0], l->rectB[1], l->rectB[2], l->rectB[3]);
 		if (im && im->w > 0 && im->h > 0)
 			for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
 				int sx = (int)((i + 0.5) * im->w / iw), sy = (int)((j + 0.5) * im->h / ih), r, g, b, al;
+				if (l->has_ccenter && (l->ccenter[0] > 0 || l->ccenter[1] > 0 || l->ccenter[2] < 1 || l->ccenter[3] < 1) && l->ccenter[2] > l->ccenter[0] && l->ccenter[3] > l->ccenter[1]) {		/* 9-slice: the corners keep their size, the centre of the image stretches */
+					double sc = im->h > ih ? (double)((im->h + ih - 1) / ih) : 1.0, cx0 = l->ccenter[0] * im->w, cw_ = (l->ccenter[2] - l->ccenter[0]) * im->w, cy0 = l->ccenter[1] * im->h, ch_ = (l->ccenter[3] - l->ccenter[1]) * im->h;	/* the vector of the 27 x 27 button image is 0.444 0.444 0.556 0.556: (x0, y0, x1, y1) */
+					double dl = cx0 / sc, dr = (im->w - cx0 - cw_) / sc, dt = cy0 / sc, db = (im->h - cy0 - ch_) / sc;
+					if (iw - dl - dr > 0 && ih - dt - db > 0) {
+						sx = i < dl ? (int)(i * sc) : (i >= iw - dr ? (int)(im->w - (iw - i) * sc) : (int)(cx0 + (i - dl) * cw_ / (iw - dl - dr)));
+						sy = j < dt ? (int)(j * sc) : (j >= ih - db ? (int)(im->h - (ih - j) * sc) : (int)(cy0 + (j - dt) * ch_ / (ih - dt - db)));
+					}
+				}
 				if (sx >= im->w) sx = im->w - 1;
 				if (sy >= im->h) sy = im->h - 1;
 				if (im->bpp == 1) {		/* an alpha-only image (the glyphs of CoreUI, format 80AL / A8): a mask, tinted with the colour of the layer (black when it has none) */
@@ -459,7 +474,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 					r = l->any_col ? (int)(l->col[0] * 255) : 0; g = l->any_col ? (int)(l->col[1] * 255) : 0; b = l->any_col ? (int)(l->col[2] * 255) : 0;
 				} else if (im->bpp == 2) {		/* grey + alpha (CoreUI GA8) */
 					const uint8_t *s = im->px + (size_t)sy * im->stride + (size_t)sx * 2;
-					r = g = b = s[0]; al = 0 * s[1];	/* not painted yet: these images (33 x 33, 27 x 27) are pieces of the window frame (9-slice: contentsCenter), stretched they make grey steps at the window's top */
+					r = g = b = s[0]; al = s[1];
 				} else if (im->bpp == 8) {
 					const uint16_t *s = (const uint16_t *)(im->px + (size_t)sy * im->stride) + (size_t)sx * 4;
 					float fr = half(s[0]), fg = half(s[1]), fb = half(s[2]), fa = half(s[3]);
