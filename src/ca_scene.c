@@ -229,6 +229,12 @@ static void do_layer(rd *r, int depth, uint64_t id)
 			while (px == NULL && port_taken < n_port) px = ool_loader(ool_ctx, cur_ool_msg, port_desc[port_taken++], &sz);
 			if (px) {
 				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
+				{	/* a CA::Render::Shmem of an Image starts with a header (u32: 2, 2, data offset 0x100, format, width, height, width, height ...: seen in the memory of SwiftUI's Text, 9 = A8); the pixels follow it */
+					const uint32_t *hd = (const uint32_t *)px;
+					if (sz >= 0x20 && hd[0] == 2 && hd[1] == 2 && hd[2] >= 0x20 && hd[2] < sz && (int)hd[4] == ct.w && (int)hd[5] == ct.h) {
+						memmove(px, px + hd[2], sz - hd[2]); sz -= hd[2];
+					}
+				}
 				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * ct.bpp) setimg(ct.imgid, &im); else free(px);
 			}
 		} else if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
@@ -407,7 +413,10 @@ static void blend(ca_canvas *win, int x, int y, int r, int g, int b, int a)
 /* the geometry of a layer as CoreAnimation has it (CA::Render::Layer::compute_frame_offset, decompiled): position (dd[0], dd[1]), bounds origin (dd[2], dd[3]), bounds size (dd[4], dd[5]); the anchor point is (0, 0) when bit 0
  * of the byte at offset 0x33 of the object (the high byte of unk[3]) is set, (0.5, 0.5) otherwise; the frame origin in the parent is position - (anchor * size + bounds origin), and the position of a child is in
  * the bounds space of its parent (the origin of its bounds is the point of the parent's frame origin).  (A layer with an extension block can have another anchor point: not read yet.) */
-static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth)
+static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth, int pflip, double ph);
+static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth) { paint_layer_f(win, id, ox, oy, pbx, pby, op, depth, 0, 0); }
+/* pflip, ph: the parent has geometryFlipped (bit 0x800 of the word at pod offset 8: NSHostingView's backing layer has it, its children measure y from the top) and this height */
+static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth, int pflip, double ph)
 {
 	layer_t *l = find(id);
 	int H = win->h;
@@ -415,6 +424,7 @@ static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, doubl
 	if (getenv("CA_PAINT_DEBUG") && l->nsubs >= 0)	fprintf(stderr, "ca_scene: tree depth %d layer %llx d=%g %g %g %g %g %g unk=%08x %08x %08x %08x %08x nsubs %d\n", depth, (unsigned long long)id, l->dd[0], l->dd[1], l->dd[2], l->dd[3], l->dd[4], l->dd[5], l->unk[0], l->unk[1], l->unk[2], l->unk[3], l->unk[4], l->nsubs);
 	if (getenv("CA_PAINT_DEBUG") && depth <= 1) fprintf(stderr, "ca_scene: paint depth %d id %llx at %.1f,%.1f size %.1fx%.1f parent origin %.1f,%.1f nsubs %d\n", depth, (unsigned long long)id, l->px_, l->py_, l->w, l->h, ox, oy, l->nsubs);
 	double ax = (l->unk[3] >> 24) & 1 ? 0.0 : 0.5, fx = l->dd[0] - (ax * l->w + l->dd[2]), fy = l->dd[1] - (ax * l->h + l->dd[3]);
+	if (pflip && depth > 0) fy = ph - (fy + l->h);
 	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby, o = l->any_col ? l->col[4] : 1.0, a = l->any_col ? l->col[3] : 0.0;
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
@@ -444,7 +454,7 @@ static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, doubl
 				blend(win, bx + i, by + j, r, g, b, (int)(al * op2));
 			}
 	}
-	for (int i = 0; i < l->nsubs; i++) paint_layer(win, l->subs[i], x, y, l->dd[2], l->dd[3], op2 > 0 ? op2 : op, depth + 1);
+	for (int i = 0; i < l->nsubs; i++) paint_layer_f(win, l->subs[i], x, y, l->dd[2], l->dd[3], op2 > 0 ? op2 : op, depth + 1, (l->unk[2] & 0x800) != 0, l->h);
 }
 static void paint_scene(ca_canvas *win)
 {
