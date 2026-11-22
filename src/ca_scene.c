@@ -109,6 +109,7 @@ static void skip_cf(rd *r, int depth)
 }
 static void do_layer(rd *r, int depth, uint64_t id);
 /* CA::Render::Texture::decode (the end of an Image): colorspace, i32, 4 x i16, shape, i32, i32, and 0x14 bytes when the Image flags say so (decompilation of QuartzCore) */
+static uint32_t tt_a, tt_b; static uint16_t tt_h[4];	/* what texture_tail read: the four 16-bit words and the last two 32-bit words (the size of a Surface) */
 static void texture_tail(rd *r, uint32_t image_flags)
 {
 	uint8_t cs = u8(r);
@@ -118,13 +119,13 @@ static void texture_tail(rd *r, uint32_t image_flags)
 	case 2: case 4: skip_cf(r, 0); break;
 	default: r->err = 1; return;
 	}
-	u32(r); for (int i = 0; i < 4; i++) u16(r);
+	u32(r); for (int i = 0; i < 4; i++) tt_h[i] = u16(r);
 	{	/* the shape: -2 bounds (4 x i32), 0 none, -1 all, else a list of n words (3 are the header) */
 		int32_t n = (int32_t)u32(r);
 		if (n == -2) { for (int i = 0; i < 4; i++) u32(r); }
 		else if (n != 0 && n != -1) { if (n < 3 || n > 0x20000) { r->err = 1; return; } raw(r, (size_t)(n - 3) * 4); }
 	}
-	u32(r); u32(r);
+	tt_a = u32(r); tt_b = u32(r);
 	if (image_flags & 0x1000) raw(r, 0x14);
 }
 static void skip_obj_(rd *r, int depth, contents_t *ct);
@@ -148,6 +149,18 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0x3e: { uint32_t n = u32(r); raw(r, 8ULL * n); break; }
 	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
 	case 0x12: { uint32_t fl = u32(r); if ((fl >> 8) & 1) skip_atom(r); else { { uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } } skip_atom(r); skip_obj(r, depth + 1, NULL); skip_arr(r, depth, NULL, NULL); } break; }
+	case 0x53: {		/* CA::Render::Surface::encode (decompiled): the pixels of a CABackingStore, an IOSurface or a shared memory; see docs: SwiftUI/docs/EVIDENCE.md, 54th pass */
+		uint8_t mode = u8(r); uint32_t w0 = u32(r); int shm = 0;
+		if (mode == 1) { skip_obj(r, depth + 1, NULL); if ((w0 >> 21) & 1) u8(r); }
+		else {
+			uint8_t src; u32(r); src = u8(r);
+			if (src == 2) { u64(r); for (int i = 0; i < 4; i++) u32(r); }
+			else if (src == 1 || src == 3) shm = 1;		/* the pixels are in the memory the next port descriptor names */
+		}
+		for (int i = 0; i < 7; i++) u8(r);
+		texture_tail(r, 0);
+		if (ct) { ct->kind = 1; ct->w = (int)tt_a; ct->h = (int)tt_b; ct->bpp = 4; ct->stride = ((int)tt_a * 4 + 15) & ~15; ct->attached = shm ? 2 : 0; }
+		break; }
 	case 0x17: {
 		uint32_t flags_i = u32(r); uint8_t fmt = u8(r); uint8_t np = u8(r); uint32_t w = u32(r), h = u32(r); uint64_t row0 = 0;
 		(void)fmt;
