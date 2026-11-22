@@ -11,7 +11,7 @@ HDRS = include/ws_gl.h include/ws_buffer.h include/ws_evrec.h include/ws.h inclu
 OUT          = window
 # set by the `kms` target
 EXTRA_SRC    =
-FAMILIES     = $(SKYLIGHT)/server/sls_ext.c $(SKYLIGHT)/server/sls_session.c $(SKYLIGHT)/server/sls_sessctl.c $(SKYLIGHT)/server/sls_cursor.c $(SKYLIGHT)/server/sls_transition.c $(SKYLIGHT)/server/sls_batch2.c $(SKYLIGHT)/server/sls_window.c $(SKYLIGHT)/server/sls_tap.c $(SKYLIGHT)/server/sls_transaction.c $(SKYLIGHT)/server/sls_golden.c $(SKYLIGHT)/server/sls_blobs.c $(SKYLIGHT)/server/sls_display.c $(SKYLIGHT)/server/sls_display_tpl.c $(SKYLIGHT)/server/sls_harvest.c $(SKYLIGHT)/server/sls_generic.c $(SKYLIGHT)/server/sls_hotkey.c $(SKYLIGHT)/server/sls_hotkey_defaults.c $(SKYLIGHT)/server/sls_space.c src/bplist.c src/sandbox.c src/vnc.c $(SKYLIGHT)/server/sls_carender.c src/ca_scene.c
+FAMILIES     = $(SKYLIGHT)/server/sls_ext.c $(SKYLIGHT)/server/sls_session.c $(SKYLIGHT)/server/sls_sessctl.c $(SKYLIGHT)/server/sls_cursor.c $(SKYLIGHT)/server/sls_transition.c $(SKYLIGHT)/server/sls_batch2.c $(SKYLIGHT)/server/sls_window.c $(SKYLIGHT)/server/sls_tap.c $(SKYLIGHT)/server/sls_transaction.c $(SKYLIGHT)/server/sls_golden.c $(SKYLIGHT)/server/sls_blobs.c $(SKYLIGHT)/server/sls_display.c $(SKYLIGHT)/server/sls_display_tpl.c $(SKYLIGHT)/server/sls_display_mac.c $(SKYLIGHT)/server/sls_harvest.c $(SKYLIGHT)/server/sls_generic.c $(SKYLIGHT)/server/sls_hotkey.c $(SKYLIGHT)/server/sls_hotkey_defaults.c $(SKYLIGHT)/server/sls_space.c src/bplist.c src/sandbox.c src/vnc.c $(SKYLIGHT)/server/sls_carender.c src/ca_scene.c
 EXTRA_CFLAGS =
 EXTRA_LIBS   =
 
