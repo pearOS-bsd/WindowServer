@@ -168,7 +168,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		if (u8(r)) { contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { ct->kind = 1; ct->attached = in.attached; } }
 		else { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) { ct->kind = 1; ct->attached = 1; } }
 		texture_tail(r, flags_i);
-		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = w ? (int)(row0 / w) : 4; ct->stride = (int)row0; }
+		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = !w ? 4 : (row0 < 2ull * w ? 1 : (row0 < 6ull * w ? 4 : 8)); ct->stride = (int)row0;	/* the rows are padded (128 bytes for 33 BGRA pixels, 64 for 34 A8): the pixel size is told by how many row bytes a pixel has at least */ }
 		break; }
 	case 0x1f: u32(r); u32(r); u8(r); break;
 	/* the formats below come from the decompilation of QuartzCore (CA::Render::<Class>::<Class>(Decoder*), REA/Ghidra) */
@@ -240,9 +240,14 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		} else if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
 			size_t sz = 0;
 			uint8_t *px = ool_loader(ool_ctx, cur_ool_msg, ool_desc[ool_taken++], &sz);
+			if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx out-of-line image %dx%d bpp %d stride %d: %s, %zu bytes, need %zu\n", (unsigned long long)id, ct.w, ct.h, ct.bpp, ct.stride, px ? "loaded" : "NOT LOADED", sz, (size_t)(ct.stride > 0 ? ct.stride : ct.w * ct.bpp) * (ct.h > 0 ? ct.h - 1 : 0) + (size_t)ct.w * ct.bpp);
 			if (px) {
 				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
-				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * ct.bpp) setimg(ct.imgid, &im); else free(px);       /* the last row is not padded: 29 * 192 + 168 = 5736 bytes for 42 x 30 */
+				if (ct.h > 1 && ct.w > 0 && sz > (size_t)im.stride * (ct.h - 1)) {		/* the last row is not padded: its bytes tell the pixel size (66 bytes for 33 pixels: 2 bytes, grey + alpha) */
+					size_t last = sz - (size_t)im.stride * (ct.h - 1);
+					if (last % (size_t)ct.w == 0 && (last / ct.w == 1 || last / ct.w == 2 || last / ct.w == 4 || last / ct.w == 8)) im.bpp = (int)(last / ct.w);
+				}
+				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * im.bpp) setimg(ct.imgid, &im); else free(px);       /* the last row is not padded: 29 * 192 + 168 = 5736 bytes for 42 x 30 */
 			}
 		}
 	}
@@ -452,6 +457,9 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 				if (im->bpp == 1) {		/* an alpha-only image (the glyphs of CoreUI, format 80AL / A8): a mask, tinted with the colour of the layer (black when it has none) */
 					al = im->px[(size_t)sy * im->stride + sx];
 					r = l->any_col ? (int)(l->col[0] * 255) : 0; g = l->any_col ? (int)(l->col[1] * 255) : 0; b = l->any_col ? (int)(l->col[2] * 255) : 0;
+				} else if (im->bpp == 2) {		/* grey + alpha (CoreUI GA8) */
+					const uint8_t *s = im->px + (size_t)sy * im->stride + (size_t)sx * 2;
+					r = g = b = s[0]; al = 0 * s[1];	/* not painted yet: these images (33 x 33, 27 x 27) are pieces of the window frame (9-slice: contentsCenter), stretched they make grey steps at the window's top */
 				} else if (im->bpp == 8) {
 					const uint16_t *s = (const uint16_t *)(im->px + (size_t)sy * im->stride) + (size_t)sx * 4;
 					float fr = half(s[0]), fg = half(s[1]), fb = half(s[2]), fa = half(s[3]);
