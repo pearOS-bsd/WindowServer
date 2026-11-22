@@ -144,7 +144,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0x1e: do_layer(r, depth, 0); break;		/* a layer inside an object: decoded, not kept */
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
 	case 0x3e: { uint32_t n = u32(r); raw(r, 8ULL * n); break; }
-	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { u64(r); u64(r); } break; }
+	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); } break; }
 	case 0x12: { uint32_t fl = u32(r); if ((fl >> 8) & 1) skip_atom(r); else { { uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } } skip_atom(r); skip_obj(r, depth + 1, NULL); skip_arr(r, depth, NULL, NULL); } break; }
 	case 0x17: {
 		uint32_t flags_i = u32(r); uint8_t fmt = u8(r); uint8_t np = u8(r); uint32_t w = u32(r), h = u32(r); uint64_t row0 = 0;
@@ -205,6 +205,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	}
 	if (hassubs) { l->nsubs = ns; memcpy(l->subs, subs, sizeof(uint64_t) * ns); }
 	if (ct.kind) {
+		if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx contents: kind %d image %llx attached %d %dx%d bpp %d stride %d (ool %d taken %d of %d)\n", (unsigned long long)id, ct.kind, (unsigned long long)ct.imgid, ct.attached, ct.w, ct.h, ct.bpp, ct.stride, cur_ool_msg, ool_taken, n_ool);
 		l->img = ct.imgid;
 		if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
 			size_t sz = 0;
@@ -305,6 +306,7 @@ static void message(const uint8_t *m, size_t n, int *nmsg)
 }
 
 static int g_nmsg;		/* complex messages fed so far: the number of the out-of-line data of the next one */
+void ca_set_msg_number(int n) { g_nmsg = n; }
 void ca_reset(void)
 {
 	for (int k = 0; k < nscenes; k++) {
@@ -459,6 +461,11 @@ void ca_paint_root(int scene, int i, uint8_t *bgra, int w_, int h_, int stride)
 	for (int j = 0; j < h_; j++) memset(bgra + (size_t)j * stride, 0, (size_t)w_ * 4);
 	if (scene < 0 || scene >= nscenes || i < 0 || i >= scenes[scene]->nroots) return;
 	S = scenes[scene];
+	if (getenv("CA_PAINT_DEBUG")) {	/* what the layers of the scene carry */
+		int ncol = 0, nvis = 0, nimg = 0, nsized = 0;
+		for (int i = 0; i < nL; i++) if (L[i].used) { if (L[i].w > 0 && L[i].h > 0) nsized++; if (L[i].any_col) { ncol++; if (L[i].col[3] > 0 && L[i].col[4] > 0) nvis++; } if (L[i].img) { nimg++; img_t *im = getimg(L[i].img); size_t nzb = 0; if (im && im->px) for (size_t q = 0; q < (size_t)im->stride * im->h; q++) if (im->px[q]) nzb++; fprintf(stderr, "ca_scene:   layer %llx cls %c %.0fx%.0f at %.0f,%.0f image %s %dx%d bpp %d stride %d, %zu non-zero bytes\n", (unsigned long long)L[i].id, L[i].cls ? L[i].cls : '-', L[i].w, L[i].h, L[i].px_, L[i].py_, im ? "found" : "MISSING", im ? im->w : 0, im ? im->h : 0, im ? im->bpp : 0, im ? im->stride : 0, nzb); } }
+		fprintf(stderr, "ca_scene: scene layers %d: %d sized, %d with a colour (%d visible), %d with an image\n", nL, nsized, ncol, nvis, nimg);
+	}
 	paint_layer(&cv, S->rootid[i], 0, 0, 1.0, 0);
 }
 /* every scene over a dark background (opaque): for a viewer that shows the whole stream in one picture */

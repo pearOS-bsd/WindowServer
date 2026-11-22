@@ -8,6 +8,7 @@ typedef uint8_t *(*ca_ool_fn)(void *ctx, int msg, int desc, size_t *size);	/* th
 void ca_set_dir(const char *dir);
 void ca_set_ool_loader(ca_ool_fn fn, void *ctx);	/* default: files in the directory */
 void ca_reset(void);
+void ca_set_msg_number(int n);	/* the number of the next complex commit (the key of its out-of-line data), when the sender numbers them */
 int ca_feed(const uint8_t *msg, size_t n);		/* one commit message (as the render server received it, from the header on); returns the scene (one for each context) it went to, -1 if not understood */
 int ca_feed_key(uint32_t key, const uint8_t *msg, size_t n);	/* the same, with the key of the scene given (the pid of the client) */
 typedef struct { int x, y, w, h, radius, mode; } ca_glass;	/* a glass shape: a rounded rectangle in the window (top left origin), mode 1 regular */
