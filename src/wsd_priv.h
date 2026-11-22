@@ -19,8 +19,11 @@ typedef struct {
 	uint32_t key_override;                                                       /* OverrideKeyRegistration bits (one per special key 0..6) */
 	int dock;                                                                    /* 0 not checked, 1 this connection is the Dock, -1 it is not */
 	uint64_t gesture_mask; uint32_t coalesce_mask, notes;                        /* SetGestureEventSubmask, CoalesceEventsInMask, SetNotifications */
-	uint8_t *dgq; size_t dgn, dgcap; int dg_wake; int mach; int first_stream;                                 /* the datagrams for the client (the real SkyLight pulls them with GetPortStreamOutofline), and whether the client was woken for them */
+	uint8_t *dgq; size_t dgn, dgcap; int dg_wake; int mach; int first_stream; int vis_sent; uint32_t vis_wids[16];                                 /* the datagrams for the client (the real SkyLight pulls them with GetPortStreamOutofline), and whether the client was woken for them */
 } conn;
+void wsd_note_mach(conn *c, uint32_t type, const void *data, uint32_t n);	/* a SkyLight notification for a Mach client that asked for the type */
+void wsd_window_visible_pid(int pid, uint32_t wid);
+void wsd_window_visible(conn *c, uint32_t wid);	/* a window of the client was ordered in: 906, 904, 912 */
 void wsd_datagram_push(conn *c, uint32_t kind, const void *payload, uint32_t n);	/* a record [kind u32][length u32][payload, padded to 4] for the client, and a wake message on its event channel */
 
 extern ws_server *srv;

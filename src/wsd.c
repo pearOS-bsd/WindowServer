@@ -1040,6 +1040,41 @@ static void push_notification(conn *t, uint32_t type, const uint8_t *data, uint3
 	int sr = ws_ipc_send(t->efd, &(struct iovec){ &m, sizeof m }, 1, NULL, 0); { static int k; if (type == 0x54415044u && k < 10) { k++; fprintf(stderr, "wsd: tap notification to conn %u: send %d\n", t->id, sr); } }
 }
 void wsd_push_notification(uint32_t owner, uint32_t type, const uint8_t *data, uint32_t n) { push_notification(conn_by_id(owner), type, data, n); }
+
+/* a notification of the window server for a Mach client (a real SkyLight process), when it asked for the type (30578): a datagram of kind 1, the payload [type u32][8 bytes][data] (the form of the
+ * Mac's: 1201 carried 8 bytes and the 24 bytes of the data, a display notification none).  Found with SwiftUI/tools/msgtrace.c (the notify procedures of AppKit wrapped): when a window of the program is
+ * ordered in, the Mac delivers 906 (started drawing, no data), 904 (application became visible, none), 912 (window became visible, the window id as 4 bytes) ... and AppKit turns them into
+ * NSWindow.occlusionState = visible, which SwiftUI waits for before it renders. */
+void wsd_note_mach(conn *c, uint32_t type, const void *data, uint32_t n)
+{
+	uint8_t rec[64];
+	if (!c || !c->mach || n > 40) return;
+	for (uint32_t k = 0; k < c->notify_n; k++) if (c->notify[k] == type) {
+		memset(rec, 0, sizeof rec); memcpy(rec, &type, 4); if (n) memcpy(rec + 12, data, n);
+		wsd_datagram_push(c, 1, rec, 12 + n);
+		if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer: notification %u (%u bytes) to conn %u\n", type, n, c->id);
+		return;
+	}
+}
+void wsd_window_visible(conn *c, uint32_t wid)
+{
+	if (!c || !c->mach) return;
+	for (int i = 0; i < 16; i++) if (c->vis_wids[i] == wid) return;	/* told once for each window */
+	for (int i = 0; i < 16; i++) if (!c->vis_wids[i]) { c->vis_wids[i] = wid; break; }
+	if (!c->vis_sent) { c->vis_sent = 1; wsd_note_mach(c, 906, NULL, 0); wsd_note_mach(c, 904, NULL, 0); }
+	wsd_note_mach(c, 912, &wid, 4);
+	{	/* then, as on the Mac: 1201 (the Dock's rectangle: 4 floats and two ints, here the 24 bytes that the Mac sent) and 827 (the window is a member of a space: its id) */
+		static const uint8_t dock[24] = { 0x00, 0x00, 0x14, 0x42, 0x00, 0xc0, 0x37, 0x44, 0x00, 0xc0, 0x96, 0x44, 0x00, 0x00, 0x82, 0x42, 5, 0, 0, 0, 2, 0, 0, 0 };
+		wsd_note_mach(c, 1201, dock, sizeof dock);
+		wsd_note_mach(c, 827, &wid, 4);
+	}
+}
+
+/* the client of a pid (the render server knows its clients by pid) */
+void wsd_window_visible_pid(int pid, uint32_t wid)
+{
+	for (int i = 0; i < MAXCONN; i++) if (conns[i].fd >= 0 && conns[i].mach && (conns[i].cpid == pid || conns[i].pid == pid)) { wsd_window_visible(&conns[i], wid); return; }
+}
 static int do_post_notification(conn *c, const uint8_t *buf, size_t len, int broadcast)
 {
 	const mach_msg_header_t *h = (const mach_msg_header_t *)buf;
