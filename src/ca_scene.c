@@ -189,8 +189,10 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	u32(r);
 	const uint8_t *pod = raw(r, 0x58);
 	contents_t ct; memset(&ct, 0, sizeof ct);
+	uint8_t ctype = r->p < r->n ? r->b[r->p] : 0; size_t cpos = r->p;
 	skip_obj(r, depth + 1, &ct);
 	if (r->err) return;
+	if (getenv("CA_DEBUG") && ctype != 0) { double dd[6]; memcpy(dd, pod + 0x28, sizeof dd); if (dd[4] >= 100) fprintf(stderr, "ca_scene: layer %llx %gx%g contents object type %#x (%zu bytes, kind %d)\n", (unsigned long long)id, dd[4], dd[5], ctype, r->p - cpos, ct.kind); }
 	uint64_t subs[MAXS]; int ns = 0, hassubs = 0;
 	{ size_t p0 = r->p; skip_arr(r, depth, subs, &ns); hassubs = r->p > p0 + 1; }
 	u64(r); skip_obj(r, depth + 1, NULL);
@@ -480,9 +482,10 @@ void ca_paint_root(int scene, int i, uint8_t *bgra, int w_, int h_, int stride)
 	if (scene < 0 || scene >= nscenes || i < 0 || i >= scenes[scene]->nroots) return;
 	S = scenes[scene];
 	if (getenv("CA_PAINT_DEBUG")) {	/* what the layers of the scene carry */
-		int ncol = 0, nvis = 0, nimg = 0, nsized = 0;
-		for (int i = 0; i < nL; i++) if (L[i].used) { if (L[i].w > 0 && L[i].h > 0) nsized++; if (L[i].any_col) { ncol++; if (L[i].col[3] > 0 && L[i].col[4] > 0) nvis++; } if (L[i].img) { nimg++; img_t *im = getimg(L[i].img); size_t nzb = 0; if (im && im->px) for (size_t q = 0; q < (size_t)im->stride * im->h; q++) if (im->px[q]) nzb++; fprintf(stderr, "ca_scene:   layer %llx cls %c %.0fx%.0f at %.0f,%.0f image %s %dx%d bpp %d stride %d, %zu non-zero bytes\n", (unsigned long long)L[i].id, L[i].cls ? L[i].cls : '-', L[i].w, L[i].h, L[i].px_, L[i].py_, im ? "found" : "MISSING", im ? im->w : 0, im ? im->h : 0, im ? im->bpp : 0, im ? im->stride : 0, nzb); } }
-		fprintf(stderr, "ca_scene: scene layers %d: %d sized, %d with a colour (%d visible), %d with an image\n", nL, nsized, ncol, nvis, nimg);
+		int ncol = 0, nvis = 0, nimg = 0, nsized = 0, ncls[3] = { 0, 0, 0 };
+		for (int i = 0; i < nL; i++) if (L[i].used) { if (L[i].w > 0 && L[i].h > 0) nsized++; if (L[i].any_col) { ncol++; if (L[i].col[3] > 0 && L[i].col[4] > 0) nvis++; } if (L[i].cls == 'E') ncls[0]++; else if (L[i].cls == 'S') ncls[1]++; else if (L[i].cls == 'B') ncls[2]++;
+			if (L[i].img) { nimg++; img_t *im = getimg(L[i].img); size_t nzb = 0; if (im && im->px) for (size_t q = 0; q < (size_t)im->stride * im->h; q++) if (im->px[q]) nzb++; fprintf(stderr, "ca_scene:   layer %llx cls %c %.0fx%.0f at %.0f,%.0f image %s %dx%d bpp %d stride %d, %zu non-zero bytes\n", (unsigned long long)L[i].id, L[i].cls ? L[i].cls : '-', L[i].w, L[i].h, L[i].px_, L[i].py_, im ? "found" : "MISSING", im ? im->w : 0, im ? im->h : 0, im ? im->bpp : 0, im ? im->stride : 0, nzb); } }
+		fprintf(stderr, "ca_scene: scene layers %d: %d sized, %d with a colour (%d visible), %d with an image, %d SDF element, %d SDF, %d backdrop\n", nL, nsized, ncol, nvis, nimg, ncls[0], ncls[1], ncls[2]);
 	}
 	paint_layer(&cv, S->rootid[i], 0, 0, 0, 0, 1.0, 0);
 }
