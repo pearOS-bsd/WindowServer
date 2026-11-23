@@ -8,6 +8,7 @@
  * Painted: background colour and opacity, Image contents (BGRA8 or RGBA half float, first plane), children on top.  Not yet: transforms, masks, filters, object types 2/3/25/160. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -39,6 +40,7 @@ typedef struct {
 	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
 	double ccenter[4]; int has_ccenter;	/* contentsCenter: the Vector at index 6 of the extension block's objects (Layer::set_contents_center writes ext + 0x30) */
 	int32_t shape[4]; int has_shape;	/* the valid part of the Image: (x0, y0, ...) of the shape record */
+	float bw, bcol[5];	/* borderWidth and borderColor of the layer (premultiplied, 5 floats like colour) */
 	shape_t *pshape;	/* the shape of a CAShapeLayer */
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
@@ -303,8 +305,9 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		skip_arr(r, depth, NULL, NULL);
 		{ const uint8_t *ra = raw(r, 16), *rb = raw(r, 16); if (ra && rb && id && !r->err) { layer_t *lr = get(id); if (lr) { memcpy(lr->rectA, ra, 16); memcpy(lr->rectB, rb, 16); lr->has_rects = 1; } } }
 		u64(r); u64(r); raw(r, 0x14); raw(r, 8);
-		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); u32(r);
-		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
+		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
+		{ const uint8_t *bc = raw(r, 0x14); if (id && !r->err && bc) { layer_t *lb = get(id); if (lb) { memcpy(&lb->bw, &bwb, 4); memcpy(lb->bcol, bc, 20); } } }	/* borderWidth (the second word after the corner radius) and the border colour (5 floats), measured against the stream of a SwiftUI stroke: 4.0 and green */
+		for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); u32(r); u64(r); skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL); u8(r);
 	}
@@ -527,6 +530,18 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 					if (d_ > 0) { double dist = __builtin_sqrt(d_) - cr + 0.5; cov = dist <= 0 ? 1.0 : (dist >= 1 ? 0.0 : 1.0 - dist); }
 				}
 				if (cov > 0) { double ia = a > 0 ? 1.0 / a : 0; int fr = (int)(l->col[0] * ia * 255 + 0.5), fg = (int)(l->col[1] * ia * 255 + 0.5), fb = (int)(l->col[2] * ia * 255 + 0.5); blend(win, bx + i, by + j, fr > 255 ? 255 : fr, fg > 255 ? 255 : fg, fb > 255 ? 255 : fb, (int)(a * op2 * cov * 255)); }
+			}
+		}
+		if (l->bw > 0 && l->bcol[3] > 0) {		/* the border: inside the bounds, along the rounded rectangle (signed distance of the pixel centre to its edge), one pixel of anti-aliasing */
+			double cr_ = l->cr > 0 ? l->cr : 0, hx = iw / 2.0, hy = ih / 2.0, ia = 1.0 / l->bcol[3];
+			if (cr_ > hx) cr_ = hx; if (cr_ > hy) cr_ = hy;
+			int br_ = (int)(l->bcol[0] * ia * 255 + 0.5), bg_ = (int)(l->bcol[1] * ia * 255 + 0.5), bb_ = (int)(l->bcol[2] * ia * 255 + 0.5);
+			if (br_ > 255) br_ = 255; if (bg_ > 255) bg_ = 255; if (bb_ > 255) bb_ = 255;
+			for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
+				double qx = fabs(i + 0.5 - hx) - hx + cr_, qy = fabs(j + 0.5 - hy) - hy + cr_, mx = qx > 0 ? qx : 0, my = qy > 0 ? qy : 0;
+				double sd = sqrt(mx * mx + my * my) + (qx > qy ? (qx < 0 ? qx : 0) : (qy < 0 ? qy : 0)) - cr_;
+				double c1 = 0.5 - sd, c2 = sd + l->bw + 0.5; c1 = c1 < 0 ? 0 : c1 > 1 ? 1 : c1; c2 = c2 < 0 ? 0 : c2 > 1 ? 1 : c2;
+				if (c1 * c2 > 0) blend(win, bx + i, by + j, br_, bg_, bb_, (int)(l->bcol[3] * op2 * c1 * c2 * 255));
 			}
 		}
 		if (l->pshape && l->pshape->has_path) paint_shape(win, l->pshape, bx, by, iw, ih, op2);
