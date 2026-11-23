@@ -40,6 +40,7 @@ typedef struct {
 	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
 	double ccenter[4]; int has_ccenter;	/* contentsCenter: the Vector at index 6 of the extension block's objects (Layer::set_contents_center writes ext + 0x30) */
 	int32_t shape[4]; int has_shape;	/* the valid part of the Image: (x0, y0, ...) of the shape record */
+	float shoff[2], shrad; int has_sh;	/* shadowOffset, shadowRadius */
 	float bw, bcol[5];	/* borderWidth and borderColor of the layer (premultiplied, 5 floats like colour) */
 	shape_t *pshape;	/* the shape of a CAShapeLayer */
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
@@ -304,8 +305,9 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL);
 		skip_arr(r, depth, NULL, NULL);
 		{ const uint8_t *ra = raw(r, 16), *rb = raw(r, 16); if (ra && rb && id && !r->err) { layer_t *lr = get(id); if (lr) { memcpy(lr->rectA, ra, 16); memcpy(lr->rectB, rb, 16); lr->has_rects = 1; } } }
-		u64(r); u64(r); raw(r, 0x14); raw(r, 8);
-		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
+		u64(r); u64(r); raw(r, 0x14); const uint8_t *sof = raw(r, 8);
+		uint32_t srb = u32(r); if (id && !r->err && sof) { layer_t *ls = get(id); if (ls) { memcpy(ls->shoff, sof, 8); memcpy(&ls->shrad, &srb, 4); ls->has_sh = 1; } }	/* shadowOffset (two floats) and shadowRadius, measured: 4 6 / 8 for .shadow(radius: 8, x: 4, y: 6); the shadow opacity is the byte at pod + 0x15 (0xff = 1.0) */
+		{ uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
 		{ const uint8_t *bc = raw(r, 0x14); if (id && !r->err && bc) { layer_t *lb = get(id); if (lb) { memcpy(&lb->bw, &bwb, 4); memcpy(lb->bcol, bc, 20); } } }	/* borderWidth (the second word after the corner radius) and the border colour (5 floats), measured against the stream of a SwiftUI stroke: 4.0 and green */
 		for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
@@ -519,6 +521,15 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
 		int bx = (int)x, by = (int)(H - (y + l->h)), iw = (int)l->w, ih = (int)l->h;
+		if (l->has_sh && (l->unk[0] >> 8 & 0xff) && a > 0) {	/* the shadow: the layer's rectangle blurred (gaussian, sigma = radius / 2), black, drawn under the layer, before its fill */
+			double sg = l->shrad > 0.5 ? l->shrad / 2.0 : 0.5, so = ((l->unk[0] >> 8) & 0xff) / 255.0 * a * op2; int m = (int)(sg * 3 + 1);
+			for (int j = -m; j < ih + m; j++) for (int i = -m; i < iw + m; i++) {
+				double cx_ = i + 0.5 - l->shoff[0], cy_ = j + 0.5 - l->shoff[1];
+				double ax = 0.5 * (erf((cx_ - 0) / (sg * 1.41421356)) - erf((cx_ - iw) / (sg * 1.41421356)));
+				double ay = 0.5 * (erf((cy_ - 0) / (sg * 1.41421356)) - erf((cy_ - ih) / (sg * 1.41421356)));
+				int al = (int)(so * ax * ay * 255); if (al > 0) blend(win, bx + i, by + j, 0, 0, 0, al);
+			}
+		}
 		if (a > 0) {
 			double cr = l->cr > 0 ? l->cr : 0, hm = (l->w < l->h ? l->w : l->h) / 2.0;	/* cornerRadius: the fill is a rounded rectangle (the radius is at most half the short side) */
 			if (cr > hm) cr = hm;
