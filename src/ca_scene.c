@@ -441,7 +441,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 	layer_t *l = find(id);
 	int H = win->h;
 	if (!l || depth > 64) return;
-	if (getenv("CA_PAINT_DEBUG") && l->nsubs >= 0)	fprintf(stderr, "ca_scene: tree depth %d layer %llx d=%g %g %g %g %g %g unk=%08x %08x %08x %08x %08x nsubs %d\n", depth, (unsigned long long)id, l->dd[0], l->dd[1], l->dd[2], l->dd[3], l->dd[4], l->dd[5], l->unk[0], l->unk[1], l->unk[2], l->unk[3], l->unk[4], l->nsubs);
+	if (getenv("CA_PAINT_DEBUG") && l->nsubs >= 0)	fprintf(stderr, "ca_scene: tree depth %d layer %llx d=%g %g %g %g %g %g unk=%08x %08x %08x %08x %08x nsubs %d cls %c col %g %g %g %g %g any %d cr %g img %d\n", depth, (unsigned long long)id, l->dd[0], l->dd[1], l->dd[2], l->dd[3], l->dd[4], l->dd[5], l->unk[0], l->unk[1], l->unk[2], l->unk[3], l->unk[4], l->nsubs, l->cls ? l->cls : '-', l->col[0], l->col[1], l->col[2], l->col[3], l->col[4], l->any_col, l->cr, l->img != 0);
 	if (getenv("CA_PAINT_DEBUG") && depth <= 1) fprintf(stderr, "ca_scene: paint depth %d id %llx at %.1f,%.1f size %.1fx%.1f parent origin %.1f,%.1f nsubs %d\n", depth, (unsigned long long)id, l->px_, l->py_, l->w, l->h, ox, oy, l->nsubs);
 	double ax = (l->unk[3] >> 24) & 1 ? 0.0 : 0.5, fx = l->dd[0] - (ax * l->w + l->dd[2]), fy = l->dd[1] - (ax * l->h + l->dd[3]);
 	if (pflip && depth > 0) fy = ph - (fy + l->h);
@@ -464,6 +464,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 		}
 		img_t *im = l->img ? getimg(l->img) : NULL;
 		if (im && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: image of layer %llx painted at %d,%d size %dx%d opacity %.2f (canvas %dx%d, depth %d)\n", (unsigned long long)id, bx, by, iw, ih, op2, win->w, H, depth);
+		if (im && im->bpp == 2 && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: ga8 layer %llx image %dx%d in layer %gx%g at %g,%g ccenter %d\n", (unsigned long long)id, im->w, im->h, l->w, l->h, x, y, l->has_ccenter);
 		if (im && im->bpp == 1 && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: mask layer %llx %dx%d col %g %g %g %g %g any %d ext_cls %c\n", (unsigned long long)id, im->w, im->h, l->col[0], l->col[1], l->col[2], l->col[3], l->col[4], l->any_col, l->cls ? l->cls : '-');
 		if (im && l->has_ccenter && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: contentsCenter of layer %llx img %dx%d: %g %g %g %g\n", (unsigned long long)id, im->w, im->h, l->ccenter[0], l->ccenter[1], l->ccenter[2], l->ccenter[3]);
 		if (im && l->has_rects && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: rects of layer %llx img %dx%d: A %g %g %g %g  B %g %g %g %g\n", (unsigned long long)id, im->w, im->h, l->rectA[0], l->rectA[1], l->rectA[2], l->rectA[3], l->rectB[0], l->rectB[1], l->rectB[2], l->rectB[3]);
