@@ -27,6 +27,7 @@ static const uint8_t *raw(rd *r, size_t k) { const uint8_t *p = r->b + r->p; if 
 #define MAXL 4096
 #define MAXS 64
 typedef struct shape shape_t;
+typedef struct { int n; float *v, *loc; double s[2], e[2]; int atom; } grad_t;	/* a CAGradientLayer: n stops (r g b a + 1 float each, premultiplied), locations, start and end points in unit coordinates, the atom of the type */
 typedef struct { int w, h, bpp, stride; uint8_t *px; } img_t;       /* stride: bytes of a row (the Image's row bytes: padded, 192 for 42 pixels) */
 typedef struct {
 	uint64_t id;
@@ -43,6 +44,7 @@ typedef struct {
 	float shoff[2], shrad; int has_sh;	/* shadowOffset, shadowRadius */
 	float bw, bcol[5];	/* borderWidth and borderColor of the layer (premultiplied, 5 floats like colour) */
 	shape_t *pshape;	/* the shape of a CAShapeLayer */
+	grad_t *grad;	/* the gradient of a CAGradientLayer */
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
@@ -86,7 +88,7 @@ static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id =
 
 /* ---- decoder ---- */
 struct shape { int nt, np; uint8_t *types; double *pts; float fill[5]; float stroke[5]; double lw; int rule, cap, join; int has_path; };	/* a CAShapeLayer (CA::Render::ShapeLayer 0x33 with a CA::Render::Path 0x26): the path elements (0 move 1 line 2 quad 3 cubic 4 close) and their points, the fill and stroke colours (5 floats like a layer's), the fill rule */
-typedef struct { int kind; uint64_t id; int attached; shape_t *pshape; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -219,8 +221,12 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 7: u32(r); break;		/* Object (QuartzCore decode_object: a bare Object: its flags) */
 	case 0x14: {		/* GradientLayer: Object flags, Gradient (vm_size_t n, i32 width = 5, i32 flags, n*5*4 bytes, locations n*4 if flags & 2, interpolations n*0x20-0x20 if flags & 4), 2 x 2 cgfloats, 2 x 2 cgfloats, atom, i32, a texture object if Object flags bit 11, colorspace */
 		uint32_t of = u32(r); uint64_t n = u64(r); u32(r); uint32_t fl = u32(r) & 0xff;
-		if (n) { raw(r, 20 * n); if (fl & 2) raw(r, 4 * n); if ((fl & 4) && n > 0) raw(r, 0x20 * n - 0x20); }
-		raw(r, 16); raw(r, 16); skip_atom(r); u32(r);
+		size_t gv = r->p; if (n) { raw(r, 20 * n); if (fl & 2) raw(r, 4 * n); if ((fl & 4) && n > 0) raw(r, 0x20 * n - 0x20); }
+		size_t gp = r->p; raw(r, 16); raw(r, 16); skip_atom(r); u32(r);
+		if (ct && !r->err && n && n < 4096) {
+			grad_t *g = calloc(1, sizeof *g);
+			if (g) { g->n = (int)n; g->v = malloc(20 * n); g->loc = fl & 2 ? malloc(4 * n) : NULL; if (g->v) { memcpy(g->v, r->b + gv, 20 * n); if (g->loc) memcpy(g->loc, r->b + gv + 20 * n, 4 * n); memcpy(g->s, r->b + gp, 16); memcpy(g->e, r->b + gp + 16, 16); g->atom = r->b[gp + 32]; ct->grad = g; } else free(g); }
+		}
 		if ((of >> 8) & 8) skip_obj(r, depth + 1, NULL);
 		if (r->p < r->n && r->b[r->p] <= 4) { uint8_t cs = u8(r); switch (cs) { case 0: case 3: break; case 1: u8(r); break; case 2: case 4: skip_cf(r, 0); break; } }		/* the colorspace: absent in the streams seen (the next byte is the 0xfe of a following object) */
 		break; }
@@ -307,7 +313,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		{ const uint8_t *ra = raw(r, 16), *rb = raw(r, 16); if (ra && rb && id && !r->err) { layer_t *lr = get(id); if (lr) { memcpy(lr->rectA, ra, 16); memcpy(lr->rectB, rb, 16); lr->has_rects = 1; } } }
 		u64(r); u64(r); raw(r, 0x14); const uint8_t *sof = raw(r, 8);
 		uint32_t srb = u32(r); if (id && !r->err && sof) { layer_t *ls = get(id); if (ls) { memcpy(ls->shoff, sof, 8); memcpy(&ls->shrad, &srb, 4); ls->has_sh = 1; } }	/* shadowOffset (two floats) and shadowRadius, measured: 4 6 / 8 for .shadow(radius: 8, x: 4, y: 6); the shadow opacity is the byte at pod + 0x15 (0xff = 1.0) */
-		{ uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
+		{ uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.grad) { if (lc->grad) { free(lc->grad->v); free(lc->grad->loc); free(lc->grad); } lc->grad = cls0.grad; } if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
 		{ const uint8_t *bc = raw(r, 0x14); if (id && !r->err && bc) { layer_t *lb = get(id); if (lb) { memcpy(&lb->bw, &bwb, 4); memcpy(lb->bcol, bc, 20); } } }	/* borderWidth (the second word after the corner radius) and the border colour (5 floats), measured against the stream of a SwiftUI stroke: 4.0 and green */
 		for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
@@ -553,6 +559,16 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 				double sd = sqrt(mx * mx + my * my) + (qx > qy ? (qx < 0 ? qx : 0) : (qy < 0 ? qy : 0)) - cr_;
 				double c1 = 0.5 - sd, c2 = sd + l->bw + 0.5; c1 = c1 < 0 ? 0 : c1 > 1 ? 1 : c1; c2 = c2 < 0 ? 0 : c2 > 1 ? 1 : c2;
 				if (c1 * c2 > 0) blend(win, bx + i, by + j, br_, bg_, bb_, (int)(l->bcol[3] * op2 * c1 * c2 * 255));
+			}
+		}
+		if (l->grad && l->grad->n >= 2 && l->grad->v) {		/* axial gradient, measured: stops are r g b a (premultiplied) + 1 float; start/end are unit coordinates */
+			grad_t *g = l->grad; double sx = g->s[0] * iw, sy = (1 - g->s[1]) * ih, dx = (g->e[0] - g->s[0]) * iw, dy = -(g->e[1] - g->s[1]) * ih, dd = dx * dx + dy * dy;
+			for (int j = 0; j < ih && dd > 0; j++) for (int i = 0; i < iw; i++) {
+				double t = ((i + 0.5 - sx) * dx + (j + 0.5 - sy) * dy) / dd; t = t < 0 ? 0 : t > 1 ? 1 : t;
+				int k = 0; while (k < g->n - 2 && g->loc && t > g->loc[k + 1]) k++;
+				double l0 = g->loc ? g->loc[k] : (double)k / (g->n - 1), l1 = g->loc ? g->loc[k + 1] : (double)(k + 1) / (g->n - 1), u = l1 > l0 ? (t - l0) / (l1 - l0) : 0; u = u < 0 ? 0 : u > 1 ? 1 : u;
+				const float *c0 = g->v + 5 * k, *c1 = g->v + 5 * (k + 1); double c[4]; for (int q = 0; q < 4; q++) c[q] = c0[q] + (c1[q] - c0[q]) * u;
+				if (c[3] > 0) { int rr = (int)(c[0] / c[3] * 255 + 0.5), gg = (int)(c[1] / c[3] * 255 + 0.5), bb = (int)(c[2] / c[3] * 255 + 0.5); rr = rr > 255 ? 255 : rr; gg = gg > 255 ? 255 : gg; bb = bb > 255 ? 255 : bb; blend(win, bx + i, by + j, rr, gg, bb, (int)(c[3] * op2 * 255)); }
 			}
 		}
 		if (l->pshape && l->pshape->has_path) paint_shape(win, l->pshape, bx, by, iw, ih, op2);
