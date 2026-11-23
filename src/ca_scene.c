@@ -144,6 +144,49 @@ static void texture_tail(rd *r, uint32_t image_flags)
 	tt_has_tint = 0;
 	if (image_flags & 0x1000) { const uint8_t *tp = raw(r, 0x14); if (tp) { memcpy(tt_tint, tp, 16); tt_has_tint = 1; } }
 }
+
+/* ICC matrix/TRC profile (the colourspace of a layer's stream, e.g. the 496-byte "CG Cal RGB" of a commit) to sRGB: the stream's colours are in that space, the display here is sRGB.  Only RGB matrix profiles with 'para' or 'curv' gamma curves (what CoreAnimation writes, measured). */
+typedef struct { double m[9]; int ptype; double pp[7]; int ok; } icc_t;
+static double be32(const uint8_t *p) { return (double)(uint32_t)(p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]); }
+static double s15(const uint8_t *p) { return (double)(int32_t)(p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]) / 65536.0; }
+static void icc_parse(const uint8_t *p, size_t n, icc_t *o)
+{
+	memset(o, 0, sizeof *o);
+	if (n < 132 || memcmp(p + 16, "RGB ", 4) || memcmp(p + 20, "XYZ ", 4)) return;
+	uint32_t nt = (uint32_t)be32(p + 128); int have = 0; const uint8_t *trc = NULL;
+	for (uint32_t k = 0; k < nt && 132 + 12 * (size_t)k + 12 <= n; k++) {
+		const uint8_t *t = p + 132 + 12 * k; size_t off = (size_t)be32(t + 4), ln = (size_t)be32(t + 8);
+		if (off + ln > n) continue;
+		int c = !memcmp(t, "rXYZ", 4) ? 0 : !memcmp(t, "gXYZ", 4) ? 1 : !memcmp(t, "bXYZ", 4) ? 2 : -1;
+		if (c >= 0 && ln >= 20) { for (int q = 0; q < 3; q++) o->m[q * 3 + c] = s15(p + off + 8 + 4 * q); have |= 1 << c; }
+		if (!memcmp(t, "rTRC", 4) && ln >= 12) trc = p + off;
+	}
+	if (have != 7 || !trc) return;
+	if (!memcmp(trc, "para", 4)) { static const int np_[5] = { 1, 3, 4, 5, 7 }; int ft = trc[8] << 8 | trc[9]; if (ft > 4) return; o->ptype = ft; for (int q = 0; q < np_[ft]; q++) o->pp[q] = s15(trc + 12 + 4 * q); o->ok = 1; }
+	else if (!memcmp(trc, "curv", 4) && be32(trc + 8) == 1) { o->ptype = 0; o->pp[0] = (trc[12] << 8 | trc[13]) / 256.0; o->ok = 1; }
+}
+static double icc_decode(const icc_t *o, double x)	/* encoded -> linear, the parametric curve types 0..4 of the ICC specification */
+{
+	double g = o->pp[0], a = o->pp[1], b = o->pp[2], c = o->pp[3], d = o->pp[4], e = o->pp[5], f = o->pp[6], ax = x < 0 ? -x : x, y;
+	switch (o->ptype) {
+	case 0: y = pow(ax, g); break;
+	case 1: y = ax >= -b / a ? pow(a * ax + b, g) : 0; break;
+	case 2: y = ax >= -b / a ? pow(a * ax + b, g) + c : c; break;
+	case 3: y = ax >= d ? pow(a * ax + b, g) : c * ax; break;
+	default: y = ax >= d ? pow(a * ax + b, g) + e : c * ax + f; break;
+	}
+	return x < 0 ? -y : y;
+}
+static void icc_to_srgb(const icc_t *o, double *rgb)
+{
+	static const double x2s[9] = { 3.1338561, -1.6168667, -0.4906146, -0.9787684, 1.9161415, 0.0334540, 0.0719453, -0.2289914, 1.4052427 };
+	double l[3], xyz[3], out[3];
+	for (int i = 0; i < 3; i++) l[i] = icc_decode(o, rgb[i]);
+	for (int i = 0; i < 3; i++) xyz[i] = o->m[i * 3] * l[0] + o->m[i * 3 + 1] * l[1] + o->m[i * 3 + 2] * l[2];
+	{ static const double d50[3] = { 0.9642, 1.0, 0.8249 }; for (int i = 0; i < 3; i++) { double w = o->m[i * 3] + o->m[i * 3 + 1] + o->m[i * 3 + 2]; if (w > 0.01) xyz[i] *= d50[i] / w; } }	/* the profile's white (R = G = B = 1) maps to the white of the destination (white point compensation) */
+	for (int i = 0; i < 3; i++) { double v = x2s[i * 3] * xyz[0] + x2s[i * 3 + 1] * xyz[1] + x2s[i * 3 + 2] * xyz[2]; v = v < 0 ? 0 : v > 1 ? 1 : v; out[i] = v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055; }
+	memcpy(rgb, out, sizeof out);
+}
 static void skip_obj_(rd *r, int depth, contents_t *ct);
 static void skip_obj(rd *r, int depth, contents_t *ct)
 {
@@ -228,7 +271,16 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 			if (g) { g->n = (int)n; g->v = malloc(20 * n); g->loc = fl & 2 ? malloc(4 * n) : NULL; if (g->v) { memcpy(g->v, r->b + gv, 20 * n); if (g->loc) memcpy(g->loc, r->b + gv + 20 * n, 4 * n); memcpy(g->s, r->b + gp, 16); memcpy(g->e, r->b + gp + 16, 16); g->atom = r->b[gp + 32]; ct->grad = g; } else free(g); }
 		}
 		if ((of >> 8) & 8) skip_obj(r, depth + 1, NULL);
+		size_t csp = r->p;
 		if (r->p < r->n && r->b[r->p] <= 4) { uint8_t cs = u8(r); switch (cs) { case 0: case 3: break; case 1: u8(r); break; case 2: case 4: skip_cf(r, 0); break; } }		/* the colorspace: absent in the streams seen (the next byte is the 0xfe of a following object) */
+		if (ct && ct->grad && !r->err) {		/* the stops are in the colourspace of the stream (an ICC matrix profile): convert them to sRGB */
+			for (size_t q = csp; q + 24 < r->p && q + 24 < r->n; q++) if (!memcmp(r->b + q + 4, "appl", 4) && !memcmp(r->b + q + 12, "mntrRGB ", 8)) {
+				icc_t ic; size_t isz = (size_t)be32(r->b + q); if (q + isz > r->n) break;
+				icc_parse(r->b + q, isz, &ic);
+				if (ic.ok) for (int k2 = 0; k2 < ct->grad->n; k2++) { float *c = ct->grad->v + 5 * k2; double a = c[3] > 0 ? c[3] : 1, rgb[3] = { c[0] / a, c[1] / a, c[2] / a }; icc_to_srgb(&ic, rgb); c[0] = (float)(rgb[0] * a); c[1] = (float)(rgb[1] * a); c[2] = (float)(rgb[2] * a); }
+				break;
+			}
+		}
 		break; }
 	case 0x1d: skip_atom(r); skip_obj(r, depth + 1, NULL); break;		/* KeyValue: atom, any object (no Object flags) */
 	case 0x3a: u32(r); u32(r); for (int i = 0; i < 5; i++) u64(r); break;	/* Timing: Object flags, i32, 5 x i64 */
