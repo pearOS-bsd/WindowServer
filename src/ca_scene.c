@@ -237,10 +237,10 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		u32(r); skip_obj(r, depth + 1, &pc);
 		const uint8_t *fc = raw(r, 0x14); skip_obj(r, depth + 1, NULL);
 		const uint8_t *sc = raw(r, 0x14); skip_obj(r, depth + 1, NULL);
-		double lw = 0; { const uint8_t *dp = raw(r, 5 * 8); if (dp) memcpy(&lw, dp, 8); }
+		double lw = 0; { const uint8_t *dp = raw(r, 5 * 8); if (dp) { double dv[5]; memcpy(dv, dp, 40); lw = dv[2]; /* order measured: strokeStart, strokeEnd, lineWidth, miterLimit, lineDashPhase */ if (getenv("CA_DEBUG_EXT")) fprintf(stderr, "ca_scene: shape doubles %g %g %g %g %g\n", dv[0], dv[1], dv[2], dv[3], dv[4]); } }
 		skip_obj(r, depth + 1, NULL);
 		uint8_t rule = u8(r), cap = u8(r), join = u8(r);
-		if (!r->err && pc.pshape) { if (fc) memcpy(pc.pshape->fill, fc, 20); if (sc) memcpy(pc.pshape->stroke, sc, 20); pc.pshape->lw = lw; pc.pshape->rule = rule; pc.pshape->cap = cap; pc.pshape->join = join; if (ct) ct->pshape = pc.pshape; else { free(pc.pshape->types); free(pc.pshape->pts); free(pc.pshape); } }
+		if (!r->err && pc.pshape) { if (fc) memcpy(pc.pshape->fill, fc, 20); if (sc) memcpy(pc.pshape->stroke, sc, 20); pc.pshape->lw = lw; if (getenv("CA_DEBUG_EXT")) fprintf(stderr, "ca_scene: shape layer: fill %g %g %g %g %g stroke %g %g %g %g %g lw %g rule %d cap %d join %d\n", pc.pshape->fill[0], pc.pshape->fill[1], pc.pshape->fill[2], pc.pshape->fill[3], pc.pshape->fill[4], pc.pshape->stroke[0], pc.pshape->stroke[1], pc.pshape->stroke[2], pc.pshape->stroke[3], pc.pshape->stroke[4], lw, rule, cap, join); pc.pshape->rule = rule; pc.pshape->cap = cap; pc.pshape->join = join; if (ct) ct->pshape = pc.pshape; else { free(pc.pshape->types); free(pc.pshape->pts); free(pc.pshape); } }
 		else if (pc.pshape) { free(pc.pshape->types); free(pc.pshape->pts); free(pc.pshape); }
 		break; }
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
@@ -555,14 +555,15 @@ static void blend(ca_canvas *win, int x, int y, int r, int g, int b, int a)
 static void paint_shape(ca_canvas *win, const shape_t *sh, int bx, int by, int iw, int ih, double op)
 {
 	enum { MAXE = 4096 };
-	static double ex0[MAXE], ey0[MAXE], ex1[MAXE], ey1[MAXE];
+	static double ex0[MAXE], ey0[MAXE], ex1[MAXE], ey1[MAXE]; static char eimp[MAXE];	/* eimp: the edge was added to close a subpath that the path does not close (not stroked) */
 	int ne = 0; double cx = 0, cy = 0, sx = 0, sy = 0; size_t pi = 0;
-	float a = sh->fill[3]; if (a <= 0 || iw <= 0 || ih <= 0) return;
+	float a = sh->fill[3], sa = sh->stroke[3]; if (iw <= 0 || ih <= 0 || (a <= 0 && (sa <= 0 || sh->lw <= 0))) return;
+	memset(eimp, 0, sizeof eimp);
 	for (int e = 0; e < sh->nt && ne < MAXE - 24; e++) {
 		int t = sh->types[e]; const double *p = sh->pts + pi * 2;
 		int need = t == 1 || t == 2 ? 1 : t == 3 ? 2 : t == 4 ? 3 : 0;	/* the path element codes of the stream: 0 close, 1 move, 2 line, 3 quadratic, 4 cubic (path_counts 0 1 1 2 3: 29 points for the check mark's 14 elements, measured) */
 		if (pi + need > (size_t)sh->np) break;
-		if (t == 1) { if (ne && (cx != sx || cy != sy)) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; ne++; } cx = sx = p[0]; cy = sy = p[1]; }
+		if (t == 1) { if (ne && (cx != sx || cy != sy)) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; eimp[ne] = 1; ne++; } cx = sx = p[0]; cy = sy = p[1]; }
 		else if (t == 2) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = p[0]; ey1[ne] = p[1]; ne++; cx = p[0]; cy = p[1]; }
 		else if (t == 3 || t == 4) {
 			for (int k = 1; k <= 8; k++) {
@@ -576,7 +577,8 @@ static void paint_shape(ca_canvas *win, const shape_t *sh, int bx, int by, int i
 		} else if (t == 0) { if (cx != sx || cy != sy) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; ne++; } cx = sx; cy = sy; }
 		pi += need;
 	}
-	if (ne && (cx != sx || cy != sy)) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; ne++; }
+	if (ne && (cx != sx || cy != sy)) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; eimp[ne] = 1; ne++; }
+	if (a <= 0) goto stroke;
 	double ia = 1.0 / a; int fr = (int)(sh->fill[0] * ia * 255 + 0.5), fg = (int)(sh->fill[1] * ia * 255 + 0.5), fb = (int)(sh->fill[2] * ia * 255 + 0.5);
 	if (fr > 255) fr = 255; if (fg > 255) fg = 255; if (fb > 255) fb = 255;
 	for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
@@ -590,6 +592,23 @@ static void paint_shape(ca_canvas *win, const shape_t *sh, int bx, int by, int i
 			if (sh->rule ? (wn & 1) : wn != 0) hit++;
 		}
 		if (hit) blend(win, bx + i, by + j, fr, fg, fb, (int)(a * op * hit / 16.0 * 255));
+	}
+stroke:
+	if (sa > 0 && sh->lw > 0) {		/* the stroke: the coverage of a pixel is how far the centre is inside half the line width of the nearest real edge (round caps and joins for every style: butt/square caps and miter joins are approximated), one pixel of anti-aliasing */
+		double hw = sh->lw / 2.0, isa = 1.0 / sa; int sr = (int)(sh->stroke[0] * isa * 255 + 0.5), sg = (int)(sh->stroke[1] * isa * 255 + 0.5), sb = (int)(sh->stroke[2] * isa * 255 + 0.5);
+		if (sr > 255) sr = 255; if (sg > 255) sg = 255; if (sb > 255) sb = 255;
+		for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
+			double px = i + 0.5, py = j + 0.5, best = 1e30;
+			for (int e = 0; e < ne; e++) {
+				if (eimp[e]) continue;
+				double dx = ex1[e] - ex0[e], dy = ey1[e] - ey0[e], l2 = dx * dx + dy * dy, t = l2 > 0 ? ((px - ex0[e]) * dx + (py - ey0[e]) * dy) / l2 : 0, qx, qy, d;
+				t = t < 0 ? 0 : t > 1 ? 1 : t; qx = ex0[e] + t * dx - px; qy = ey0[e] + t * dy - py; d = qx * qx + qy * qy;
+				if (d < best) best = d;
+			}
+			if (best >= 1e29) continue;
+			double cov = hw + 0.5 - sqrt(best); cov = cov < 0 ? 0 : cov > 1 ? 1 : cov;
+			if (cov > 0) blend(win, bx + i, by + j, sr, sg, sb, (int)(sa * op * cov * 255));
+		}
 	}
 }
 static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth, int pflip, double ph);
