@@ -240,11 +240,13 @@ static void do_layer(rd *r, int depth, uint64_t id)
 				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
 				{	/* a CA::Render::Shmem of an Image starts with a header (u32: 2, 2, data offset 0x100, format, width, height, width, height ...: seen in the memory of SwiftUI's Text, 9 = A8); the pixels follow it */
 					const uint32_t *hd = (const uint32_t *)px;
-					if (sz >= 0x20 && hd[0] == 2 && hd[1] == 2 && hd[2] >= 0x20 && hd[2] < sz && (int)hd[4] == ct.w && (int)hd[5] == ct.h) {
+					if (getenv("CA_DEBUG_EXT") && sz >= 0x20) fprintf(stderr, "ca_scene: shm of layer %llx: %zu bytes, header %x %x %x %x %u %u %u %u, record %dx%d stride %d\n", (unsigned long long)id, sz, hd[0], hd[1], hd[2], hd[3], hd[4], hd[5], hd[6], hd[7], ct.w, ct.h, ct.stride);
+					if (sz >= 0x20 && hd[0] == 2 && hd[1] == 2 && hd[2] >= 0x20 && hd[2] < sz && hd[6] > 0 && hd[6] <= hd[4] && hd[7] > 0 && hd[7] <= hd[5] && (int)hd[4] <= ct.w + 64 && (int)hd[5] <= ct.h + 64) {
+						im.w = (int)hd[6]; im.h = (int)hd[7];		/* the width of the Image record is the width of the buffer (a power of two: 64, 128 for a line of 49 pixels); the header of the memory has the size of the buffer (u32 4, 5) and the size of the picture (u32 6, 7: 64 x 16 buffer, 48 x 16 picture) */
 						memmove(px, px + hd[2], sz - hd[2]); sz -= hd[2];
 					}
 				}
-				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * ct.bpp) setimg(ct.imgid, &im); else free(px);
+				if (im.h > 0 && sz >= (size_t)im.stride * (im.h - 1) + (size_t)im.w * im.bpp) setimg(ct.imgid, &im); else free(px);
 			}
 		} else if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
 			size_t sz = 0;
