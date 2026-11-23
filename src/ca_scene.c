@@ -83,12 +83,28 @@ uint32_t ca_scene_ctx(int i) { return i >= 0 && i < nscenes ? scenes[i]->ctx : 0
 
 static layer_t *find(uint64_t id) { for (int i = 0; i < nL; i++) if (L[i].used && L[i].id == id) return &L[i]; return NULL; }
 static layer_t *get(uint64_t id) { layer_t *l = find(id); if (l) return l; for (int i = 0; i < nL; i++) if (!L[i].used) { l = &L[i]; goto init; } if (nL >= MAXL) return NULL; l = &L[nL++]; init: memset(l, 0, sizeof *l); l->used = 1; l->id = id; return l; }
-static void setimg(uint64_t id, img_t *im) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) { free(IM[i].im.px); IM[i].im = *im; return; } if (nIM < MAXL) { IM[nIM].id = id; IM[nIM].im = *im; nIM++; } }
+
+/* CA_DUMP_IMG=dir: every image that arrives (A8 or BGRA) is written as <dir>/img-<id>-<n>.pgm (A8) or .ppm (BGRA): to see what the render server really got */
+static void dump_img(uint64_t id, const img_t *im)
+{
+	const char *dir = getenv("CA_DUMP_IMG"); static int n; char p[200];
+	if (!dir || !im->px || im->w <= 0 || im->h <= 0) return;
+	snprintf(p, sizeof p, "%s/img-%llx-%d.%s", dir, (unsigned long long)id, n++, im->bpp == 1 ? "pgm" : "ppm");
+	FILE *f = fopen(p, "wb"); if (!f) return;
+	fprintf(f, "%s\n%d %d\n255\n", im->bpp == 1 ? "P5" : "P6", im->w, im->h);
+	for (int y = 0; y < im->h; y++) for (int x = 0; x < im->w; x++) { const uint8_t *q = im->px + (size_t)y * im->stride + (size_t)x * im->bpp; if (im->bpp == 1) fputc(q[0], f); else { fputc(q[2], f); fputc(q[1], f); fputc(q[0], f); } }
+	fclose(f);
+	if (im->bpp == 4) {	/* and the alpha channel of a BGRA image as a pgm */
+		snprintf(p, sizeof p, "%s/img-%llx-%d.alpha.pgm", dir, (unsigned long long)id, n - 1);
+		if ((f = fopen(p, "wb")) != NULL) { fprintf(f, "P5\n%d %d\n255\n", im->w, im->h); for (int y = 0; y < im->h; y++) for (int x = 0; x < im->w; x++) fputc(im->px[(size_t)y * im->stride + (size_t)x * 4 + 3], f); fclose(f); }
+	}
+}
+static void setimg(uint64_t id, img_t *im) { dump_img(id, im); for (int i = 0; i < nIM; i++) if (IM[i].id == id) { free(IM[i].im.px); IM[i].im = *im; return; } if (nIM < MAXL) { IM[nIM].id = id; IM[nIM].im = *im; nIM++; } }
 static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) return &IM[i].im; return NULL; }
 
 /* ---- decoder ---- */
 struct shape { int nt, np; uint8_t *types; double *pts; float fill[5]; float stroke[5]; double lw; int rule, cap, join; int has_path; };	/* a CAShapeLayer (CA::Render::ShapeLayer 0x33 with a CA::Render::Path 0x26): the path elements (0 move 1 line 2 quad 3 cubic 4 close) and their points, the fill and stroke colours (5 floats like a layer's), the fill rule */
-typedef struct { int kind; uint64_t id; int attached; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; const uint8_t *inl; size_t inl_n; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -201,8 +217,9 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	if (r->err) return;
 	switch (t) {
 	case 0: break;
-	case 0xff: { uint64_t i = u64(r); u32(r); if (ct) { ct->kind = 2; ct->imgid = i; } break; }
-	case 0xfe: { uint64_t i = u64(r); u32(r); contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { *ct = in; ct->imgid = i; } break; }
+	/* an Image is identified by its id AND its generation (the u32 after the id): the render server's ids are recycled (the address of the object), the generation tells a new buffer from the old one that other layers still show: 0x9e37... mixes both into one key */
+	case 0xff: { uint64_t i = u64(r); i ^= (uint64_t)u32(r) * 0x9e3779b97f4a7c15ULL; if (ct) { ct->kind = 2; ct->imgid = i; } break; }
+	case 0xfe: { uint64_t i = u64(r); i ^= (uint64_t)u32(r) * 0x9e3779b97f4a7c15ULL; contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { *ct = in; ct->imgid = i; } break; }
 	case 0x1e: do_layer(r, depth, 0); break;		/* a layer inside an object: decoded, not kept */
 	case 0x26: {		/* CA::Render::Path::decode (decompiled): i32 flags, 0x20 bytes (bounds), 0x10 bytes, vm_size_t, i32 element count, i32 point count, i32 (curves), the element bytes, point count x 2 doubles */
 		uint32_t flags_ = u32(r); (void)flags_; raw(r, 0x20); raw(r, 0x10); u64(r);
@@ -228,7 +245,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		break; }
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
 	case 0x3e: { uint32_t n = u32(r); const uint8_t *vp = raw(r, 8ULL * n); if (ct && vp && n >= 4) { memcpy(ct->vec, vp, 32); ct->nvec = 4; } break; }		/* CA::Render::Vector: u32 count, then count doubles */
-	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
+	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) { const uint8_t *ip = raw(r, n); if (ct && ip) { ct->inl = ip; ct->inl_n = (size_t)n; } } else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
 	case 0x12: { uint32_t fl = u32(r); if ((fl >> 8) & 1) skip_atom(r); else { { uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } } skip_atom(r); skip_obj(r, depth + 1, NULL); skip_arr(r, depth, NULL, NULL); } break; }
 	case 0x53: {		/* CA::Render::Surface::encode (decompiled): the pixels of a CABackingStore, an IOSurface or a shared memory; see docs: SwiftUI/docs/EVIDENCE.md, 54th pass */
 		uint8_t mode = u8(r); uint32_t w0 = u32(r); int shm = 0;
@@ -246,8 +263,8 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		uint32_t flags_i = u32(r); uint8_t fmt = u8(r); uint8_t np = u8(r); uint32_t w = u32(r), h = u32(r); uint64_t row0 = 0;
 		(void)fmt;
 		for (int i = 0; i < np && !r->err; i++) { uint64_t v = u64(r); if (i == 0) row0 = v; }
-		if (u8(r)) { contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { ct->kind = 1; ct->attached = in.attached; } }
-		else { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) { ct->kind = 1; ct->attached = 1; } }
+		if (u8(r)) { contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { ct->kind = 1; ct->attached = in.attached; ct->inl = in.inl; ct->inl_n = in.inl_n; } }
+		else { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) { const uint8_t *ip = raw(r, n); if (ct && ip) { ct->inl = ip; ct->inl_n = (size_t)n; } } else if (ct) { ct->kind = 1; ct->attached = 1; } }
 		texture_tail(r, flags_i);
 		if (ct) { ct->kind = 1; ct->w = (int)w; ct->h = (int)h; ct->bpp = !w ? 4 : (row0 < 2ull * w ? 1 : (row0 < 6ull * w ? 4 : 8)); ct->has_tint = tt_has_tint; memcpy(ct->tint, tt_tint, 16); ct->has_shape = tt_has_shape; memcpy(ct->shape, tt_shape, 16); ct->stride = (int)row0;	/* the rows are padded (128 bytes for 33 BGRA pixels, 64 for 34 A8): the pixel size is told by how many row bytes a pixel has at least */ }
 		break; }
@@ -333,6 +350,18 @@ static void do_layer(rd *r, int depth, uint64_t id)
 					}
 				}
 				if (im.h > 0 && sz >= (size_t)im.stride * (im.h - 1) + (size_t)im.w * im.bpp) setimg(ct.imgid, &im); else free(px);
+			}
+		} else if (ct.kind == 1 && ct.attached == 0 && ct.inl != NULL && ct.inl_n > 0) {		/* the pixels travel inside the commit stream (a small Image: the label of a Text that changed): a copy of them */
+			uint8_t *px = malloc(ct.inl_n); size_t sz = ct.inl_n;
+			if (px) {
+				memcpy(px, ct.inl, sz);
+				img_t im; im.w = ct.w; im.h = ct.h; im.bpp = ct.bpp; im.stride = ct.stride > 0 ? ct.stride : ct.w * ct.bpp; im.px = px;
+				if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx inline image %dx%d bpp %d stride %d: %zu bytes\n", (unsigned long long)id, ct.w, ct.h, ct.bpp, ct.stride, sz);
+				if (ct.h > 1 && ct.w > 0 && sz > (size_t)im.stride * (ct.h - 1)) {
+					size_t last = sz - (size_t)im.stride * (ct.h - 1);
+					if (last % (size_t)ct.w == 0 && (last / ct.w == 1 || last / ct.w == 2 || last / ct.w == 4 || last / ct.w == 8)) im.bpp = (int)(last / ct.w);
+				}
+				if (ct.h > 0 && sz >= (size_t)im.stride * (ct.h - 1) + (size_t)ct.w * im.bpp) setimg(ct.imgid, &im); else free(px);
 			}
 		} else if (ct.kind == 1 && ct.attached && cur_ool_msg >= 0 && ool_taken < n_ool) {
 			size_t sz = 0;
