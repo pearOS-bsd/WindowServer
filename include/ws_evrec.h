@@ -33,6 +33,7 @@ int ws_evrec_keycode(const ws_evrec *r);                    /* field 9, -1 if ab
 int ws_evrec_click_state(const ws_evrec *r);                /* field 1 */
 
 /* builders reproduce the bytes CGEventCreateData produces for the same event; return the length or 0 */
+size_t ws_evrec_make_scroll(uint8_t *out, size_t cap, float x, float y, uint32_t flags, int dx_pts, int dy_pts, int continuous, uint64_t ts);
 size_t ws_evrec_make_mouse(uint8_t *out, size_t cap, int type, float x, float y, uint32_t flags, int click_state, int button, uint64_t ts);
 size_t ws_evrec_make_key(uint8_t *out, size_t cap, int down, int keycode, uint32_t flags, float x, float y, uint64_t ts, int ch, int f50);
 #endif

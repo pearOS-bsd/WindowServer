@@ -326,6 +326,7 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e0)
 		case WS_EV_MOUSE_MOVE: cg = (e->buttons & 1) ? 6 : (e->buttons & 2) ? 7 : 5; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 0, 0, 0); break;      /* a move with a button down is a drag */
 		case WS_EV_MOUSE_DOWN: cg = (e->buttons & 2) ? 3 : 1; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
 		case WS_EV_MOUSE_UP: cg = (e->buttons & 2) ? 4 : 2; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
+		case WS_EV_SCROLL: cg = 22; n = ws_evrec_make_scroll(rec, sizeof rec, gx, gy, e->flags, e->dx, e->dy, e->continuous, 0); break;
 		case WS_EV_KEY_DOWN: cg = 10; n = ws_evrec_make_key(rec, sizeof rec, 1, e->key, e->flags, gx, gy, 0, cgkey_char(e->key, e->flags), 0x0a); break;
 		case WS_EV_KEY_UP: cg = 11; n = ws_evrec_make_key(rec, sizeof rec, 0, e->key, e->flags, gx, gy, 0, cgkey_char(e->key, e->flags), 0x0a); break;
 		default: break;

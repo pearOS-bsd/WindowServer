@@ -100,3 +100,24 @@ size_t ws_evrec_make_key(uint8_t *out, size_t cap, int down, int keycode, uint32
 	i32f(&w, 0x7f, 0); i32f(&w, 0x80, 0); i32f(&w, 0x52, (uint32_t)ch);
 	return w.bad ? 0 : w.n;
 }
+
+/* a scroll wheel event (type 22), field for field as CGEventCreateData gives it on a Mac (SwiftUI/docs/EVIDENCE.md, 84th pass; no 0xa9 field, no tail): axis 1 is vertical, axis 2 horizontal; the
+ * point deltas (0x60..0x62) are the pixels, the plain deltas (0x0b..0x0d) the lines, the fixed point ones (0x5d..0x5f) 16.16 lines; 0x58 says whether the device scrolls continuously (a trackpad) */
+size_t ws_evrec_make_scroll(uint8_t *out, size_t cap, float x, float y, uint32_t flags, int dx_pts, int dy_pts, int continuous, uint64_t ts)
+{
+	wbuf w = { out, cap, 0, 0 };
+	int l1 = dy_pts / 10, l2 = dx_pts / 10;
+	w32(&w, 2);
+	i32f(&w, 0x35, 0); i32f(&w, 0x36, 0); i32f(&w, 0x37, 22);
+	f2f(&w, 0x38, x, y); f2f(&w, 0x39, -1.0f, -1.0f);
+	i64f(&w, 0x3a, ts); i32f(&w, 0x3b, flags);
+	i32f(&w, 0x33, 0); i32f(&w, 0x34, 0); i32f(&w, 0x6a, 0); i32f(&w, 0x6b, 0);
+	i32f(&w, 0x0b, (uint32_t)l1); i32f(&w, 0x0c, (uint32_t)l2); i32f(&w, 0x0d, 0);
+	i32f(&w, 0x58, continuous ? 1u : 0); i32f(&w, 0x89, 0);
+	i32f(&w, 0x5d, (uint32_t)(l1 * 65536)); i32f(&w, 0x5e, (uint32_t)(l2 * 65536)); i32f(&w, 0x5f, 0);
+	i32f(&w, 0x60, (uint32_t)dy_pts); i32f(&w, 0x61, (uint32_t)dx_pts); i32f(&w, 0x62, 0);
+	i32f(&w, 0xad, 0); i32f(&w, 0x63, 0); i32f(&w, 0x64, 0);
+	w32(&w, 0x0001c000u | 0xaf); w32(&w, 0); w32(&w, 0x0001c000u | 0xb0); w32(&w, 0);
+	w32(&w, 0x0001c000u | 0xb1); w32(&w, 0); w32(&w, 0x0001c000u | 0xb2); w32(&w, 0);
+	return w.bad ? 0 : w.n;
+}
