@@ -285,7 +285,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		size_t gp = r->p; raw(r, 16); raw(r, 16); skip_atom(r); u32(r);
 		if (ct && !r->err && n && n < 4096) {
 			grad_t *g = calloc(1, sizeof *g);
-			if (g) { g->n = (int)n; g->v = malloc(20 * n); g->loc = fl & 2 ? malloc(4 * n) : NULL; if (g->v) { memcpy(g->v, r->b + gv, 20 * n); if (g->loc) memcpy(g->loc, r->b + gv + 20 * n, 4 * n); memcpy(g->s, r->b + gp, 16); memcpy(g->e, r->b + gp + 16, 16); g->atom = r->b[gp + 32]; ct->grad = g; } else free(g); }
+			if (g) { g->n = (int)n; g->v = malloc(20 * n); g->loc = fl & 2 ? malloc(4 * n) : NULL; if (g->v) { memcpy(g->v, r->b + gv, 20 * n); if (g->loc) memcpy(g->loc, r->b + gv + 20 * n, 4 * n); memcpy(g->s, r->b + gp, 16); memcpy(g->e, r->b + gp + 16, 16); g->atom = r->b[gp + 32]; ct->grad = g; if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: gradient layer: %d stops, atom %#x, start %g %g end %g %g\n", g->n, g->atom, g->s[0], g->s[1], g->e[0], g->e[1]); } else free(g); }
 		}
 		if ((of >> 8) & 8) skip_obj(r, depth + 1, NULL);
 		size_t csp = r->p;
@@ -645,7 +645,17 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 		if (l->grad && l->grad->n >= 2 && l->grad->v) {		/* axial gradient, measured: stops are r g b a (premultiplied) + 1 float; start/end are unit coordinates */
 			grad_t *g = l->grad; double sx = g->s[0] * iw, sy = (1 - g->s[1]) * ih, dx = (g->e[0] - g->s[0]) * iw, dy = -(g->e[1] - g->s[1]) * ih, dd = dx * dx + dy * dy;
 			for (int j = 0; j < ih && dd > 0; j++) for (int i = 0; i < iw; i++) {
-				double t = ((i + 0.5 - sx) * dx + (j + 0.5 - sy) * dy) / dd; t = t < 0 ? 0 : t > 1 ? 1 : t;
+				double t;
+				if (g->atom == 0xfe) {		/* radial: the end point gives the two radii (|end - start| in unit coordinates, scaled by the layer size), elliptical */
+					double rx = fabs(g->e[0] - g->s[0]) * iw, ry = fabs(g->e[1] - g->s[1]) * ih, ux = (i + 0.5 - sx) / (rx > 0 ? rx : 1), uy = (j + 0.5 - sy) / (ry > 0 ? ry : 1);
+					t = sqrt(ux * ux + uy * uy);
+				} else if (g->atom == 0x80) {		/* conic: the start point is the centre, the end point the direction of the first colour, the gradient turns clockwise */
+					double a = atan2(j + 0.5 - sy, i + 0.5 - sx) - atan2(dy, dx);
+					while (a < 0) a += 2 * M_PI;
+					while (a >= 2 * M_PI) a -= 2 * M_PI;
+					t = a / (2 * M_PI);
+				} else t = ((i + 0.5 - sx) * dx + (j + 0.5 - sy) * dy) / dd;
+				t = t < 0 ? 0 : t > 1 ? 1 : t;
 				int k = 0; while (k < g->n - 2 && g->loc && t > g->loc[k + 1]) k++;
 				double l0 = g->loc ? g->loc[k] : (double)k / (g->n - 1), l1 = g->loc ? g->loc[k + 1] : (double)(k + 1) / (g->n - 1), u = l1 > l0 ? (t - l0) / (l1 - l0) : 0; u = u < 0 ? 0 : u > 1 ? 1 : u;
 				const float *c0 = g->v + 5 * k, *c1 = g->v + 5 * (k + 1); double c[4]; for (int q = 0; q < 4; q++) c[q] = c0[q] + (c1[q] - c0[q]) * u;
