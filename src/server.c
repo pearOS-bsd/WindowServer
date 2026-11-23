@@ -439,6 +439,15 @@ static void place(ws_server *s, window *w, int mode, window *rel)
 	free(v);
 }
 
+extern ws_wid sls_render_bound_window(ws_wid rw);
+/* the program that owns a window for the purpose of the keyboard: a render window (owner 0) shows a window of a client program, and that program is its owner */
+static uint32_t key_owner(ws_server *s, ws_wid id)
+{
+	window *w = get(s, id);
+	if (!w) return 0;
+	if (w->owner == 0) { ws_wid b = sls_render_bound_window(id); window *bw = b ? get(s, b) : NULL; if (bw) return bw->owner; }
+	return w->owner;
+}
 static void set_key_window(ws_server *s, ws_wid id);
 /* a window that takes the keyboard when it appears: an ordinary application window (not the menu bar, the Dock, an icon or a tooltip) */
 static int takes_key(const window *w) { return w->level == 0 && w->frame.w >= 100 && w->frame.h >= 60 && EFFA(w) > 0; }
@@ -456,7 +465,7 @@ static int order_group(ws_server *s, ws_wid id, int mode, ws_wid rel, int depth)
 	} else {
 		int was_on = w->on_screen;
 		place(s, w, mode == WS_BELOW ? WS_BELOW : WS_ABOVE, rel ? get(s, rel) : NULL);
-		if (depth == 0 && !was_on && mode != WS_BELOW && takes_key(w) && !(w->owner != 0 && s->key_win != id && get(s, s->key_win) && get(s, s->key_win)->on_screen && get(s, s->key_win)->owner == w->owner)) set_key_window(s, id);      /* (a second window of a program that has the keyboard does not take it: AppKit asks for the key window itself; SwiftUI's text field opens a helper window) */      /* a window that appears becomes the key window, the one the keys go to */
+		if (depth == 0 && !was_on && mode != WS_BELOW && takes_key(w) && !(w->owner != 0 && s->key_win != id && get(s, s->key_win) && get(s, s->key_win)->on_screen && key_owner(s, s->key_win) == w->owner)) set_key_window(s, id);      /* (a second window of a program that has the keyboard does not take it: AppKit asks for the key window itself; SwiftUI's text field opens a helper window) */      /* a window that appears becomes the key window, the one the keys go to */
 	}
 	if (depth < 8)                                                      /* the windows grouped with this one for ordering follow it: out with it, else above / below it */
 		for (size_t i = 0; i < s->n; i++) {
