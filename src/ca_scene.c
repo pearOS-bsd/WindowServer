@@ -268,7 +268,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	if (ext) {
 		{ contents_t cc6, cx[12]; memset(&cc6, 0, sizeof cc6); memset(cx, 0, sizeof cx);
 		if (getenv("CA_DEBUG_EXT") && r->p < r->n) fprintf(stderr, "ca_scene: ext of layer %llx: first object type %#x\n", (unsigned long long)id, r->b[r->p]);
-		for (int i = 0; i < 1 + 6 + 1 + 4; i++) { skip_obj(r, depth + 1, i == 0 ? &cls0 : &cx[i]); if (i == 6) cc6 = cx[6]; }
+		for (int i = 0; i < 1 + 6 + 1 + 4; i++) { if (getenv("CA_DEBUG_EXT") && r->p < r->n) fprintf(stderr, "ca_scene: ext object %d of layer %llx type %#x\n", i, (unsigned long long)id, r->b[r->p]); skip_obj(r, depth + 1, i == 0 ? &cls0 : &cx[i]); if (i == 6) cc6 = cx[6]; }
 		if (getenv("CA_DEBUG_EXT")) for (int i = 1; i < 12; i++) if (cx[i].nvec) fprintf(stderr, "ca_scene: ext object %d of layer %llx is a vector: %g %g %g %g\n", i, (unsigned long long)id, cx[i].vec[0], cx[i].vec[1], cx[i].vec[2], cx[i].vec[3]);
 		if (cc6.nvec == 4 && id && !r->err) { layer_t *lq = get(id); if (lq) { memcpy(lq->ccenter, cc6.vec, 32); lq->has_ccenter = 1; } } }
 		skip_arr(r, depth, NULL, NULL); skip_arr(r, depth, NULL, NULL);
