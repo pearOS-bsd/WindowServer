@@ -446,7 +446,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 	if (getenv("CA_PAINT_DEBUG") && depth <= 1) fprintf(stderr, "ca_scene: paint depth %d id %llx at %.1f,%.1f size %.1fx%.1f parent origin %.1f,%.1f nsubs %d\n", depth, (unsigned long long)id, l->px_, l->py_, l->w, l->h, ox, oy, l->nsubs);
 	double ax = (l->unk[3] >> 24) & 1 ? 0.0 : 0.5, fx = l->dd[0] - (ax * l->w + l->dd[2]), fy = l->dd[1] - (ax * l->h + l->dd[3]);
 	if (pflip && depth > 0) fy = ph - (fy + l->h);
-	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby, o = l->any_col ? (getenv("CA_FORCE_OPACITY") && l->col[4] == 0 ? 1.0 : l->col[4]) : 1.0, a = l->any_col ? l->col[3] : 0.0;
+	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby, o = (l->unk[0] & 0xff) / 255.0, a = l->any_col ? l->col[3] : 0.0;	/* measured against the layer tree of the same window on the Mac (SwiftUI/tests/hello, TREE lines): the opacity is the byte at pod + 0x14 (0xff = 1.0; 0x1a = the CAChameleonLayer's 0.1), the colour floats are the background colour PREMULTIPLIED (white at alpha 0.098 is 0.098 0.098 0.098 0.098) and the fifth float is not the opacity (it is 0 for translucent fills, 1 for opaque ones) */
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
 		int bx = (int)x, by = (int)(H - (y + l->h)), iw = (int)l->w, ih = (int)l->h;
@@ -460,7 +460,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 					double dx_ = px_ - cx_, dy_ = py_ - cy_, d_ = dx_ * dx_ + dy_ * dy_;
 					if (d_ > 0) { double dist = __builtin_sqrt(d_) - cr + 0.5; cov = dist <= 0 ? 1.0 : (dist >= 1 ? 0.0 : 1.0 - dist); }
 				}
-				if (cov > 0) blend(win, bx + i, by + j, (int)(l->col[0] * 255), (int)(l->col[1] * 255), (int)(l->col[2] * 255), (int)(a * op2 * cov * 255));
+				if (cov > 0) { double ia = a > 0 ? 1.0 / a : 0; int fr = (int)(l->col[0] * ia * 255 + 0.5), fg = (int)(l->col[1] * ia * 255 + 0.5), fb = (int)(l->col[2] * ia * 255 + 0.5); blend(win, bx + i, by + j, fr > 255 ? 255 : fr, fg > 255 ? 255 : fg, fb > 255 ? 255 : fb, (int)(a * op2 * cov * 255)); }
 			}
 		}
 		img_t *im = l->img ? getimg(l->img) : NULL;
