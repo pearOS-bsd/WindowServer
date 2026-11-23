@@ -456,7 +456,7 @@ static int order_group(ws_server *s, ws_wid id, int mode, ws_wid rel, int depth)
 	} else {
 		int was_on = w->on_screen;
 		place(s, w, mode == WS_BELOW ? WS_BELOW : WS_ABOVE, rel ? get(s, rel) : NULL);
-		if (depth == 0 && !was_on && mode != WS_BELOW && takes_key(w)) set_key_window(s, id);      /* a window that appears becomes the key window, the one the keys go to */
+		if (depth == 0 && !was_on && mode != WS_BELOW && takes_key(w) && !(w->owner != 0 && s->key_win != id && get(s, s->key_win) && get(s, s->key_win)->on_screen && get(s, s->key_win)->owner == w->owner)) set_key_window(s, id);      /* (a second window of a program that has the keyboard does not take it: AppKit asks for the key window itself; SwiftUI's text field opens a helper window) */      /* a window that appears becomes the key window, the one the keys go to */
 	}
 	if (depth < 8)                                                      /* the windows grouped with this one for ordering follow it: out with it, else above / below it */
 		for (size_t i = 0; i < s->n; i++) {

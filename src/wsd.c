@@ -266,6 +266,15 @@ static void tap_deliver(const ws_event *e)
 }
 
 
+
+/* the character of a CGKeyCode on the US keyboard (ANSI layout; shift selects the upper row): the keyboard fields of a CGEvent carry it and AppKit inserts it from there */
+static int cgkey_char(int code, uint32_t flags)
+{
+	static const char lo[] = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\rlj'k;\\,/nm.\t `\177";
+	static const char up[] = "ASDFHGZXCV\0BQWERYT!@#$^%+(&_*)}OU{IP\rLJ\"K:|<?NM>\t ~\177";
+	if (code < 0 || code >= (int)sizeof lo - 1) return 0;
+	return (flags & 0x20000) ? up[code] : lo[code];
+}
 /* The datagram form of a CGEvent record: the records of ws_evrec (CGEventCreateData form, every word big-endian) become the body of a kind 0 datagram of the Mac's SkyLight (measured on a Mac,
  * SwiftUI/docs/EVIDENCE.md, 69th pass): the leading word and the tags and the integers are little-endian, the pairs of floats keep their big-endian bytes, a 64-bit integer is little-endian.
  * Field 0x33 is the window number, 0x34 the event number, 0x39 the location in the window; the rest of the record is the one of ws_evrec. */
@@ -300,9 +309,12 @@ static size_t evrec_to_datagram(const uint8_t *r, size_t n, uint8_t *o, size_t c
 }
 void wsd_datagram_push(conn *c, uint32_t kind, const void *payload, uint32_t n);
 /* events queued for a window are also pushed to its owner's event channel, if the connection opened one */
-static void push_event(void *ctx, uint32_t owner, const ws_event *e)
+extern ws_wid sls_render_bound_window(ws_wid rw);
+static void push_event(void *ctx, uint32_t owner, const ws_event *e0)
 {
 	(void)ctx;
+	ws_event ev = *e0; const ws_event *e = &ev;
+	if (owner == 0) { ws_wid b = sls_render_bound_window(ev.wid); if (b) { ev.wid = b; owner = ws_window_owner(srv, b); } }	/* the keyboard focus can sit on the render window that shows a client's window: its events are the client window's */
 	tap_deliver(e);
 	conn *c = conn_by_id(owner);
 	if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer: event %d for window %u -> owner %u (%s)\n", e->type, (unsigned)e->wid, owner, c ? (c->efd >= 0 ? "pushed" : "no event channel") : "no connection");
@@ -314,8 +326,8 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e)
 		case WS_EV_MOUSE_MOVE: cg = (e->buttons & 1) ? 6 : (e->buttons & 2) ? 7 : 5; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 0, 0, 0); break;      /* a move with a button down is a drag */
 		case WS_EV_MOUSE_DOWN: cg = (e->buttons & 2) ? 3 : 1; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
 		case WS_EV_MOUSE_UP: cg = (e->buttons & 2) ? 4 : 2; n = ws_evrec_make_mouse(rec, sizeof rec, cg, gx, gy, e->flags, 1, (e->buttons & 2) ? 1 : 0, 0); break;
-		case WS_EV_KEY_DOWN: cg = 10; n = ws_evrec_make_key(rec, sizeof rec, 1, e->key, e->flags, gx, gy, 0, 0, 0x0a); break;
-		case WS_EV_KEY_UP: cg = 11; n = ws_evrec_make_key(rec, sizeof rec, 0, e->key, e->flags, gx, gy, 0, 0, 0x0a); break;
+		case WS_EV_KEY_DOWN: cg = 10; n = ws_evrec_make_key(rec, sizeof rec, 1, e->key, e->flags, gx, gy, 0, cgkey_char(e->key, e->flags), 0x0a); break;
+		case WS_EV_KEY_UP: cg = 11; n = ws_evrec_make_key(rec, sizeof rec, 0, e->key, e->flags, gx, gy, 0, cgkey_char(e->key, e->flags), 0x0a); break;
 		default: break;
 		}
 		if (n) {
