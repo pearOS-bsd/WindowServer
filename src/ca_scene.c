@@ -213,7 +213,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	uint8_t ctype = r->p < r->n ? r->b[r->p] : 0; size_t cpos = r->p;
 	skip_obj(r, depth + 1, &ct);
 	if (r->err) return;
-	if (getenv("CA_DEBUG") && ctype != 0) { double dd[6]; memcpy(dd, pod + 0x28, sizeof dd); if (dd[4] >= 100) fprintf(stderr, "ca_scene: layer %llx %gx%g contents object type %#x (%zu bytes, kind %d)\n", (unsigned long long)id, dd[4], dd[5], ctype, r->p - cpos, ct.kind); }
+	if (getenv("CA_DEBUG") && ctype != 0) { double dd[6]; memcpy(dd, pod + 0x28, sizeof dd); if (dd[4] >= 10) fprintf(stderr, "ca_scene: layer %llx %gx%g contents object type %#x (%zu bytes, kind %d)\n", (unsigned long long)id, dd[4], dd[5], ctype, r->p - cpos, ct.kind); }
 	uint64_t subs[MAXS]; int ns = 0, hassubs = 0;
 	{ size_t p0 = r->p; skip_arr(r, depth, subs, &ns); hassubs = r->p > p0 + 1; }
 	u64(r); skip_obj(r, depth + 1, NULL);
@@ -267,6 +267,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 	contents_t cls0; memset(&cls0, 0, sizeof cls0);
 	if (ext) {
 		{ contents_t cc6, cx[12]; memset(&cc6, 0, sizeof cc6); memset(cx, 0, sizeof cx);
+		if (getenv("CA_DEBUG_EXT") && r->p < r->n) fprintf(stderr, "ca_scene: ext of layer %llx: first object type %#x\n", (unsigned long long)id, r->b[r->p]);
 		for (int i = 0; i < 1 + 6 + 1 + 4; i++) { skip_obj(r, depth + 1, i == 0 ? &cls0 : &cx[i]); if (i == 6) cc6 = cx[6]; }
 		if (getenv("CA_DEBUG_EXT")) for (int i = 1; i < 12; i++) if (cx[i].nvec) fprintf(stderr, "ca_scene: ext object %d of layer %llx is a vector: %g %g %g %g\n", i, (unsigned long long)id, cx[i].vec[0], cx[i].vec[1], cx[i].vec[2], cx[i].vec[3]);
 		if (cc6.nvec == 4 && id && !r->err) { layer_t *lq = get(id); if (lq) { memcpy(lq->ccenter, cc6.vec, 32); lq->has_ccenter = 1; } } }
@@ -445,7 +446,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 	if (getenv("CA_PAINT_DEBUG") && depth <= 1) fprintf(stderr, "ca_scene: paint depth %d id %llx at %.1f,%.1f size %.1fx%.1f parent origin %.1f,%.1f nsubs %d\n", depth, (unsigned long long)id, l->px_, l->py_, l->w, l->h, ox, oy, l->nsubs);
 	double ax = (l->unk[3] >> 24) & 1 ? 0.0 : 0.5, fx = l->dd[0] - (ax * l->w + l->dd[2]), fy = l->dd[1] - (ax * l->h + l->dd[3]);
 	if (pflip && depth > 0) fy = ph - (fy + l->h);
-	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby, o = l->any_col ? l->col[4] : 1.0, a = l->any_col ? l->col[3] : 0.0;
+	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby, o = l->any_col ? (getenv("CA_FORCE_OPACITY") && l->col[4] == 0 ? 1.0 : l->col[4]) : 1.0, a = l->any_col ? l->col[3] : 0.0;
 	double op2 = op * (o > 0 ? (o > 1 ? 1 : o) : 0);
 	if (l->w > 0 && l->h > 0 && op2 > 0) {
 		int bx = (int)x, by = (int)(H - (y + l->h)), iw = (int)l->w, ih = (int)l->h;
