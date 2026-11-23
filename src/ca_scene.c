@@ -25,6 +25,7 @@ static const uint8_t *raw(rd *r, size_t k) { const uint8_t *p = r->b + r->p; if 
 /* ---- the scene ---- */
 #define MAXL 4096
 #define MAXS 64
+typedef struct shape shape_t;
 typedef struct { int w, h, bpp, stride; uint8_t *px; } img_t;       /* stride: bytes of a row (the Image's row bytes: padded, 192 for 42 pixels) */
 typedef struct {
 	uint64_t id;
@@ -38,6 +39,7 @@ typedef struct {
 	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
 	double ccenter[4]; int has_ccenter;	/* contentsCenter: the Vector at index 6 of the extension block's objects (Layer::set_contents_center writes ext + 0x30) */
 	int32_t shape[4]; int has_shape;	/* the valid part of the Image: (x0, y0, ...) of the shape record */
+	shape_t *pshape;	/* the shape of a CAShapeLayer */
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
@@ -80,7 +82,8 @@ static void setimg(uint64_t id, img_t *im) { for (int i = 0; i < nIM; i++) if (I
 static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id == id) return &IM[i].im; return NULL; }
 
 /* ---- decoder ---- */
-typedef struct { int kind; uint64_t id; int attached; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+struct shape { int nt, np; uint8_t *types; double *pts; float fill[5]; float stroke[5]; double lw; int rule, cap, join; int has_path; };	/* a CAShapeLayer (CA::Render::ShapeLayer 0x33 with a CA::Render::Path 0x26): the path elements (0 move 1 line 2 quad 3 cubic 4 close) and their points, the fill and stroke colours (5 floats like a layer's), the fill rule */
+typedef struct { int kind; uint64_t id; int attached; shape_t *pshape; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -153,6 +156,28 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0xff: { uint64_t i = u64(r); u32(r); if (ct) { ct->kind = 2; ct->imgid = i; } break; }
 	case 0xfe: { uint64_t i = u64(r); u32(r); contents_t in; memset(&in, 0, sizeof in); skip_obj(r, depth + 1, &in); if (ct) { *ct = in; ct->imgid = i; } break; }
 	case 0x1e: do_layer(r, depth, 0); break;		/* a layer inside an object: decoded, not kept */
+	case 0x26: {		/* CA::Render::Path::decode (decompiled): i32 flags, 0x20 bytes (bounds), 0x10 bytes, vm_size_t, i32 element count, i32 point count, i32 (curves), the element bytes, point count x 2 doubles */
+		uint32_t flags_ = u32(r); (void)flags_; raw(r, 0x20); raw(r, 0x10); u64(r);
+		uint32_t nt = u32(r), np = u32(r); u32(r);
+		if (r->err || nt >= 0x1000000 || np >= 0x1000000) { r->err = 1; break; }
+		const uint8_t *tp = raw(r, nt); const uint8_t *pp = raw(r, (size_t)np * 16);
+		if (!r->err && ct && tp && pp) {
+			shape_t *sh = calloc(1, sizeof *sh);
+			if (sh) { sh->types = malloc(nt ? nt : 1); sh->pts = malloc(np ? (size_t)np * 16 : 1); if (getenv("CA_DEBUG_EXT")) { fprintf(stderr, "ca_scene: path types:"); for (uint32_t q = 0; q < nt; q++) fprintf(stderr, " %d", tp[q]); fprintf(stderr, " | %u points:", np); for (uint32_t q = 0; q < np && q < 24; q++) { double d2[2]; memcpy(d2, pp + (size_t)q * 16, 16); fprintf(stderr, " (%.3f,%.3f)", d2[0], d2[1]); } fprintf(stderr, "\n"); }
+			if (sh->types && sh->pts) { memcpy(sh->types, tp, nt); memcpy(sh->pts, pp, (size_t)np * 16); sh->nt = (int)nt; sh->np = (int)np; sh->has_path = 1; ct->pshape = sh; } else { free(sh->types); free(sh->pts); free(sh); } }
+		}
+		break; }
+	case 0x33: {		/* CA::Render::ShapeLayer (decompiled): Object flags, the Path object (0x26), 0x14 bytes (fill colour), an object (0x27), 0x14 bytes (stroke colour), an object (0x27), 5 doubles (line width, miter limit, dash phase, stroke start, stroke end), the dash Vector (0x3e), i8 fill rule (0..1), i8 line cap (0..2), i8 line join (0..2) */
+		contents_t pc; memset(&pc, 0, sizeof pc);
+		u32(r); skip_obj(r, depth + 1, &pc);
+		const uint8_t *fc = raw(r, 0x14); skip_obj(r, depth + 1, NULL);
+		const uint8_t *sc = raw(r, 0x14); skip_obj(r, depth + 1, NULL);
+		double lw = 0; { const uint8_t *dp = raw(r, 5 * 8); if (dp) memcpy(&lw, dp, 8); }
+		skip_obj(r, depth + 1, NULL);
+		uint8_t rule = u8(r), cap = u8(r), join = u8(r);
+		if (!r->err && pc.pshape) { if (fc) memcpy(pc.pshape->fill, fc, 20); if (sc) memcpy(pc.pshape->stroke, sc, 20); pc.pshape->lw = lw; pc.pshape->rule = rule; pc.pshape->cap = cap; pc.pshape->join = join; if (ct) ct->pshape = pc.pshape; else { free(pc.pshape->types); free(pc.pshape->pts); free(pc.pshape); } }
+		else if (pc.pshape) { free(pc.pshape->types); free(pc.pshape->pts); free(pc.pshape); }
+		break; }
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
 	case 0x3e: { uint32_t n = u32(r); const uint8_t *vp = raw(r, 8ULL * n); if (ct && vp && n >= 4) { memcpy(ct->vec, vp, 32); ct->nvec = 4; } break; }		/* CA::Render::Vector: u32 count, then count doubles */
 	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) raw(r, n); else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
@@ -278,7 +303,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		skip_arr(r, depth, NULL, NULL);
 		{ const uint8_t *ra = raw(r, 16), *rb = raw(r, 16); if (ra && rb && id && !r->err) { layer_t *lr = get(id); if (lr) { memcpy(lr->rectA, ra, 16); memcpy(lr->rectB, rb, 16); lr->has_rects = 1; } } }
 		u64(r); u64(r); raw(r, 0x14); raw(r, 8);
-		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; } } } u32(r); u32(r);
+		u32(r); { uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); u32(r); u64(r); skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL); u8(r);
@@ -434,6 +459,47 @@ static void blend(ca_canvas *win, int x, int y, int r, int g, int b, int a)
 /* the geometry of a layer as CoreAnimation has it (CA::Render::Layer::compute_frame_offset, decompiled): position (dd[0], dd[1]), bounds origin (dd[2], dd[3]), bounds size (dd[4], dd[5]); the anchor point is (0, 0) when bit 0
  * of the byte at offset 0x33 of the object (the high byte of unk[3]) is set, (0.5, 0.5) otherwise; the frame origin in the parent is position - (anchor * size + bounds origin), and the position of a child is in
  * the bounds space of its parent (the origin of its bounds is the point of the parent's frame origin).  (A layer with an extension block can have another anchor point: not read yet.) */
+/* fills the path of a shape layer: the path is in the layer's own coordinates (y down inside the flipped views of AppKit, as measured: the check mark of the Toggle runs from the top left to the bottom and up to the top right), flattened (cubics and quadratics in 8 steps), filled with the non-zero or even-odd rule by 4 x 4 samples per pixel.  The colour is premultiplied like the layer's colour. */
+static void paint_shape(ca_canvas *win, const shape_t *sh, int bx, int by, int iw, int ih, double op)
+{
+	enum { MAXE = 4096 };
+	static double ex0[MAXE], ey0[MAXE], ex1[MAXE], ey1[MAXE];
+	int ne = 0; double cx = 0, cy = 0, sx = 0, sy = 0; size_t pi = 0;
+	float a = sh->fill[3]; if (a <= 0 || iw <= 0 || ih <= 0) return;
+	for (int e = 0; e < sh->nt && ne < MAXE - 24; e++) {
+		int t = sh->types[e]; const double *p = sh->pts + pi * 2;
+		int need = t == 1 || t == 2 ? 1 : t == 3 ? 2 : t == 4 ? 3 : 0;	/* the path element codes of the stream: 0 close, 1 move, 2 line, 3 quadratic, 4 cubic (path_counts 0 1 1 2 3: 29 points for the check mark's 14 elements, measured) */
+		if (pi + need > (size_t)sh->np) break;
+		if (t == 1) { if (ne && (cx != sx || cy != sy)) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; ne++; } cx = sx = p[0]; cy = sy = p[1]; }
+		else if (t == 2) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = p[0]; ey1[ne] = p[1]; ne++; cx = p[0]; cy = p[1]; }
+		else if (t == 3 || t == 4) {
+			for (int k = 1; k <= 8; k++) {
+				double u = k / 8.0, v = 1 - u, nx, ny;
+				if (t == 3) { nx = v * v * cx + 2 * v * u * p[0] + u * u * p[2]; ny = v * v * cy + 2 * v * u * p[1] + u * u * p[3]; }
+				else { nx = v * v * v * cx + 3 * v * v * u * p[0] + 3 * v * u * u * p[2] + u * u * u * p[4]; ny = v * v * v * cy + 3 * v * v * u * p[1] + 3 * v * u * u * p[3] + u * u * u * p[5]; }
+				static double px, py; (void)px; (void)py;
+				ex0[ne] = k == 1 ? cx : ex1[ne - 1]; ey0[ne] = k == 1 ? cy : ey1[ne - 1]; ex1[ne] = nx; ey1[ne] = ny; ne++;
+			}
+			cx = p[(need - 1) * 2]; cy = p[(need - 1) * 2 + 1];
+		} else if (t == 0) { if (cx != sx || cy != sy) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; ne++; } cx = sx; cy = sy; }
+		pi += need;
+	}
+	if (ne && (cx != sx || cy != sy)) { ex0[ne] = cx; ey0[ne] = cy; ex1[ne] = sx; ey1[ne] = sy; ne++; }
+	double ia = 1.0 / a; int fr = (int)(sh->fill[0] * ia * 255 + 0.5), fg = (int)(sh->fill[1] * ia * 255 + 0.5), fb = (int)(sh->fill[2] * ia * 255 + 0.5);
+	if (fr > 255) fr = 255; if (fg > 255) fg = 255; if (fb > 255) fb = 255;
+	for (int j = 0; j < ih; j++) for (int i = 0; i < iw; i++) {
+		int hit = 0;
+		for (int sj = 0; sj < 4; sj++) for (int si = 0; si < 4; si++) {
+			double x = i + (si + 0.5) / 4, y = j + (sj + 0.5) / 4; int wn = 0;
+			for (int e = 0; e < ne; e++) {
+				double y0 = ey0[e], y1 = ey1[e];
+				if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) { double xc = ex0[e] + (y - y0) * (ex1[e] - ex0[e]) / (y1 - y0); if (xc > x) wn += y1 > y0 ? 1 : -1; }
+			}
+			if (sh->rule ? (wn & 1) : wn != 0) hit++;
+		}
+		if (hit) blend(win, bx + i, by + j, fr, fg, fb, (int)(a * op * hit / 16.0 * 255));
+	}
+}
 static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth, int pflip, double ph);
 static void paint_layer(ca_canvas *win, uint64_t id, double ox, double oy, double pbx, double pby, double op, int depth) { paint_layer_f(win, id, ox, oy, pbx, pby, op, depth, 0, 0); }
 /* pflip, ph: the parent has geometryFlipped (bit 0x800 of the word at pod offset 8: NSHostingView's backing layer has it, its children measure y from the top) and this height */
@@ -463,6 +529,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 				if (cov > 0) { double ia = a > 0 ? 1.0 / a : 0; int fr = (int)(l->col[0] * ia * 255 + 0.5), fg = (int)(l->col[1] * ia * 255 + 0.5), fb = (int)(l->col[2] * ia * 255 + 0.5); blend(win, bx + i, by + j, fr > 255 ? 255 : fr, fg > 255 ? 255 : fg, fb > 255 ? 255 : fb, (int)(a * op2 * cov * 255)); }
 			}
 		}
+		if (l->pshape && l->pshape->has_path) paint_shape(win, l->pshape, bx, by, iw, ih, op2);
 		img_t *im = l->img ? getimg(l->img) : NULL;
 		if (im && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: image of layer %llx painted at %d,%d size %dx%d opacity %.2f (canvas %dx%d, depth %d)\n", (unsigned long long)id, bx, by, iw, ih, op2, win->w, H, depth);
 		if (im && im->bpp == 2 && getenv("CA_PAINT_DEBUG")) fprintf(stderr, "ca_scene: ga8 layer %llx image %dx%d in layer %gx%g at %g,%g ccenter %d\n", (unsigned long long)id, im->w, im->h, l->w, l->h, x, y, l->has_ccenter);
