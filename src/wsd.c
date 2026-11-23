@@ -265,6 +265,39 @@ static void tap_deliver(const ws_event *e)
 	if (n) sls_tap_deliver(cg, rec, n);
 }
 
+
+/* The datagram form of a CGEvent record: the records of ws_evrec (CGEventCreateData form, every word big-endian) become the body of a kind 0 datagram of the Mac's SkyLight (measured on a Mac,
+ * SwiftUI/docs/EVIDENCE.md, 69th pass): the leading word and the tags and the integers are little-endian, the pairs of floats keep their big-endian bytes, a 64-bit integer is little-endian.
+ * Field 0x33 is the window number, 0x34 the event number, 0x39 the location in the window; the rest of the record is the one of ws_evrec. */
+static size_t evrec_to_datagram(const uint8_t *r, size_t n, uint8_t *o, size_t cap, uint32_t wid, uint32_t evno, float lx, float ly, uint64_t ts)
+{
+	size_t i = 4, w = 4;
+	if (n < 4 || cap < n + 16) return 0;
+	o[0] = 0; o[1] = 0; o[2] = 0; o[3] = 3;
+	while (i + 4 <= n) {
+		uint32_t t = (uint32_t)r[i] << 24 | (uint32_t)r[i + 1] << 16 | (uint32_t)r[i + 2] << 8 | r[i + 3];
+		unsigned kind = t >> 16, top = (t >> 14) & 3, id = t & 0x3fff; i += 4;
+		memcpy(o + w, &t, 4); w += 4;				/* the tag, little-endian */
+		if (top == 1 || (top == 3 && kind == 1)) {
+			uint32_t v; if (i + 4 > n) return 0; v = (uint32_t)r[i] << 24 | (uint32_t)r[i + 1] << 16 | (uint32_t)r[i + 2] << 8 | r[i + 3]; i += 4;
+			if (id == 0x33) v = wid; else if (id == 0x34) v = evno;
+			memcpy(o + w, &v, 4); w += 4;
+		} else {
+			if (i + 8 > n) return 0;
+			if (top == 3) {					/* a pair of floats: the bytes stay as they are */
+				if (id == 0x39) { uint32_t a, b; memcpy(&a, &lx, 4); memcpy(&b, &ly, 4); for (int k = 0; k < 4; k++) { o[w + k] = (uint8_t)(a >> (24 - 8 * k)); o[w + 4 + k] = (uint8_t)(b >> (24 - 8 * k)); } }
+				else memcpy(o + w, r + i, 8);
+				w += 8;
+			} else {					/* a 64-bit integer */
+				uint64_t v = (uint64_t)r[i] << 56 | (uint64_t)r[i + 1] << 48 | (uint64_t)r[i + 2] << 40 | (uint64_t)r[i + 3] << 32 | (uint64_t)r[i + 4] << 24 | (uint64_t)r[i + 5] << 16 | (uint64_t)r[i + 6] << 8 | r[i + 7];
+				if ((id == 0x3a || id == 0xa9) && ts) v = ts;
+				memcpy(o + w, &v, 8); w += 8;
+			}
+			i += 8;
+		}
+	}
+	return w;
+}
 void wsd_datagram_push(conn *c, uint32_t kind, const void *payload, uint32_t n);
 /* events queued for a window are also pushed to its owner's event channel, if the connection opened one */
 static void push_event(void *ctx, uint32_t owner, const ws_event *e)
@@ -274,7 +307,7 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e)
 	conn *c = conn_by_id(owner);
 	if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer: event %d for window %u -> owner %u (%s)\n", e->type, (unsigned)e->wid, owner, c ? (c->efd >= 0 ? "pushed" : "no event channel") : "no connection");
 	if (!c || c->efd < 0) return;
-	if (c->mach && getenv("WSD_MAC_DG")) {		/* the SkyLight of the Mac takes the events as serialized CGEvents from the datagram stream (woken by a message on its notification port) */
+	if (c->mach && !getenv("WSD_NO_MAC_DG")) {		/* the SkyLight of the Mac takes the events as serialized CGEvents from the datagram stream (woken by a message on its notification port) */
 		int cg; uint8_t rec[512]; size_t n = 0; ws_rect f = { 0, 0, 0, 0 }; ws_window_frame(srv, e->wid, &f);
 		float gx = (float)(f.x + e->x), gy = (float)(f.y + e->y);
 		switch (e->type) {
@@ -285,7 +318,11 @@ static void push_event(void *ctx, uint32_t owner, const ws_event *e)
 		case WS_EV_KEY_UP: cg = 11; n = ws_evrec_make_key(rec, sizeof rec, 0, e->key, e->flags, gx, gy, 0, 0, 0x0a); break;
 		default: break;
 		}
-		if (n) { wsd_datagram_push(c, 0, rec, (uint32_t)n); if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer:   datagram (kind 0) with a CGEvent record of %zu bytes for the Mac client\n", n); }
+		if (n) {
+			static uint32_t evno = 0x597db; uint8_t dg[640]; struct timespec tsp; clock_gettime(CLOCK_MONOTONIC, &tsp);
+			size_t dn = evrec_to_datagram(rec, n, dg, sizeof dg, e->wid, ++evno, (float)e->x, (float)e->y, (uint64_t)tsp.tv_sec * 1000000000ull + (uint64_t)tsp.tv_nsec);
+			if (dn) wsd_datagram_push(c, 0, dg, (uint32_t)dn);
+			if (getenv("WSD_TRACE")) fprintf(stderr, "WindowServer:   datagram (kind 0) with a CGEvent record of %zu bytes for the Mac client\n", n); }
 		return;
 	}
 	wsx_event_msg m; memset(&m, 0, sizeof m);

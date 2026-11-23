@@ -807,6 +807,7 @@ void ws_server_mouse(ws_server *s, int x, int y, int buttons)
 		set_key_window(s, 0);
 	}
 	window *w = get(s, target);
+	if (getenv("WSD_TRACE_MOUSE") && (moved || pressed || released)) fprintf(stderr, "WindowServer: mouse %d,%d buttons %d target %u window %s event_mask %#x\n", x, y, buttons, (unsigned)target, w ? "yes" : "none", w ? (unsigned)w->event_mask : 0);
 	if (w) {
 		int lx = x - w->frame.x, ly = y - w->frame.y;
 		if (moved) post(w, WS_EV_MOUSE_MOVE, lx, ly, buttons, 0);
