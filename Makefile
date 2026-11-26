@@ -163,6 +163,8 @@ wsshot: tools/wsshot.c libwsclient.a
 	$(CC) $(CFLAGS) -o $@ tools/wsshot.c libwsclient.a $(LDLIBS)
 wsshow: tools/wsshow.c libwsclient.a
 	$(CC) $(CFLAGS) -o $@ tools/wsshow.c libwsclient.a $(LDLIBS)
+caoffline: tools/caoffline.c src/ca_scene.c include/ca_scene.h
+	$(CC) $(CFLAGS) -Iinclude -o $@ tools/caoffline.c src/ca_scene.c -lm
 wscarender: tools/wscarender.c src/ca_scene.c include/ca_scene.h libwsclient.a
 	$(CC) $(CFLAGS) -o $@ tools/wscarender.c src/ca_scene.c libwsclient.a $(LDLIBS)
 wsclick: tools/wsclick.c libwsclient.a
