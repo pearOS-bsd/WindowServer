@@ -483,10 +483,19 @@ void ca_reset(void)
 	}
 	nscenes = 0; S = NULL; g_nmsg = 0;
 }
+/* a scene whose client is gone: its layers and images go, its slot stays (the windows of the window server are indexed by the slot) and is taken by the next new client */
+void ca_scene_drop(int k)
+{
+	if (k < 0 || k >= nscenes || !scenes[k]) return;
+	for (int i = 0; i < scenes[k]->nimages; i++) free(scenes[k]->images[i].im.px);
+	memset(scenes[k], 0, sizeof *scenes[k]);
+	if (S == scenes[k]) S = NULL;
+}
 /* the scene of a context (made when it is first seen) */
 static struct scene *scene_for(uint32_t ctx, int *idx)
 {
 	for (int i = 0; i < nscenes; i++) if (scenes[i]->ctx == ctx) { *idx = i; return scenes[i]; }
+	for (int i = 0; i < nscenes; i++) if (scenes[i]->ctx == 0 && scenes[i]->nlayers == 0) { scenes[i]->ctx = ctx; *idx = i; return scenes[i]; }	/* a dropped slot */
 	if (nscenes >= MAXSCENES) return NULL;
 	struct scene *n = calloc(1, sizeof *n);
 	if (!n) return NULL;

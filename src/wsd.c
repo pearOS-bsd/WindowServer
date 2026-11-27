@@ -1550,7 +1550,9 @@ int main(int argc, char **argv)
 #endif
 		{ static struct timespec fr16 = { 0, 16 * 1000 * 1000 }; if (ws_server_cursor_animating()) to = &fr16; }
 		if (fus_active) { static struct timespec q = { 0, 250 * 1000 * 1000 }; if (!to || to->tv_sec > 0 || to->tv_nsec > q.tv_nsec) to = &q; }       /* the console may change at any time: look at it four times a second */
+		{ static struct timespec one_s = { 1, 0 }; if (cals >= 0 && (!to || to->tv_sec >= 1)) to = &one_s; }	/* the render clients are looked at once a second */
 		int n = kevent(kq, NULL, 0, out, 16, to);
+		if (cals >= 0) { static time_t last_reap; time_t nowr = time(NULL); if (nowr != last_reap) { last_reap = nowr; if (wsd_ca_reap(srv)) dirty = 1; } }	/* render clients that are gone lose their windows */
 		{ static uid_t seen = (uid_t)-2; sess_refresh(); uid_t now_c = fus_active ? console_uid : (uid_t)-3; if (now_c != seen) { seen = now_c; ws_server_invalidate(srv); dirty = 1; } }
 		if (n < 0) { if (errno == EINTR) continue; perror("WindowServer: kevent"); break; }
 #ifdef WS_KMS
