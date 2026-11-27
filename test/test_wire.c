@@ -143,7 +143,9 @@ int main(void)
 			{
 				uint8_t ca[0x50]; memset(ca, 0, sizeof ca); hdr((mach_msg_header_t *)ca, 0x50, SLS_MSG_CreateApplication, 0);
 				memcpy(ca + 0x18, &WS_NDR, 8);
-				wr32(ca, 0x24, 0x77); wr32(ca, 0x28, 1); wr32(ca, 0x2c, 1234); wr32(ca, 0x30, 1); wr32(ca, 0x34, 501); wr32(ca, 0x3c, 4); memcpy(ca + 0x40, "wire", 4);
+				wr32(ca, 0x24, 0x77); wr32(ca, 0x28, 1); wr32(ca, 0x2c, 0); wr32(ca, 0x30, 1); wr32(ca, 0x34, 0); wr32(ca, 0x3c, 4); memcpy(ca + 0x40, "wire", 4);	/* the layout of SkyLight's __CGSCreateApplication: pid@0x34 */
+				CHECK(rc_of(cfd, ca, 0x50, SLS_MSG_CreateApplication + 100) == -50);            /* pid 0 (and no flag): refused */
+				wr32(ca, 0x34, 1234);
 				wr32(ca, 0x28, 0);
 				CHECK(rc_of(cfd, ca, 0x50, SLS_MSG_CreateApplication + 100) == -50);            /* session id 0: refused */
 				wr32(ca, 0x28, 1);
