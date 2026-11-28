@@ -1220,6 +1220,7 @@ static void compose_impl(ws_server *s, ws_surface *screen, int reference)
 	s->comp->fill(s->comp, screen, all, 37.0f / 255.0f, 37.0f / 255.0f, 37.0f / 255.0f, 1.0f);   /* desktop: #252525 */
 	if (g_splash) { int desk = 0; for (size_t i = 0; i < n; i++) if (v[i]->level == -2147483603) desk = 1; if (g_shutdown_splash) { desk = 0; n = 0; } g_splash_visible = !desk; if (!desk) { if (s->comp->flush) s->comp->flush(s->comp); { double c0 = mono_now(); draw_splash(screen); splash_cost = mono_now() - c0; } } }
 	for (size_t i = 0; i < n; i++) {
+		if (getenv("WS_GLASS_DEBUG") && v[i]->nglass > 0) { static int dq; if (dq++ < 60) fprintf(stderr, "compose: window %u nglass %d meets %d\n", (unsigned)v[i]->id, v[i]->nglass, !cur || full_frame(all, scr) || r_meet(cur[i].f, all)); }
 		if (cur && !full_frame(all, scr) && !r_meet(cur[i].f, all)) continue;       /* nothing of this window (shadow and effect margin included) lies in the damage */
 		if (v[i]->mesh) {}       /* a window drawn through its mesh (the genie): its blur / glass stays out, else the backdrop of the unwarped rectangle stayed blurred (a blur spot) and every frame paid for it */
 		else if (v[i]->nglass > 0) {                                               /* the glass material (the Dock's bar, the menu bar, glass views): the window's shapes melt into one */
@@ -1395,10 +1396,11 @@ int ws_set_window_glass_slot(ws_server *s, ws_wid id, int slot, ws_rect r, int r
 	}
 	return 0;
 }
-int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set, float src_blur, const float *under_m)
+int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set, float src_blur, const float *under_m, uint64_t backdrop_id, int owner)
 {
 	window *w = get(s, id); if (!w || slot < 0 || slot >= WS_GLASS_MAX) return -1;
 	ws_glass *g = &w->glass[slot];
+	g->backdrop_id = backdrop_id; g->owner = owner;
 	if (!p) { if (g->has_params) { g->has_params = 0; bump(s); } return 0; }
 	if (!g->has_params || memcmp(g->p, p, sizeof g->p) || memcmp(g->set, set, sizeof g->set) || g->src_blur != src_blur || g->has_under != (under_m != NULL) || (under_m && memcmp(g->under_m, under_m, sizeof g->under_m))) { memcpy(g->p, p, sizeof g->p); memcpy(g->set, set, sizeof g->set); g->src_blur = src_blur; g->has_under = under_m != NULL; if (under_m) memcpy(g->under_m, under_m, sizeof g->under_m); g->has_params = 1; bump(s); }
 	return 0;

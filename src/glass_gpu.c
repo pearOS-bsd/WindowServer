@@ -97,6 +97,16 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	if (!src || !dst) { if (getenv("WS_GLASS_DEBUG")) fprintf(stderr, "glass_gpu: textures %dx%d levels %d: %llx %llx\n", W, H, levels, (unsigned long long)src, (unsigned long long)dst); pmwc_release(src); pmwc_release(dst); return 0; }
 	uint8_t *lv = malloc((size_t)W * H * 4), *nx = malloc((size_t)W * H * 4);
 	for (int y = 0; y < H; y++) memcpy(lv + (size_t)y * W * 4, img->px + (size_t)(y0 + y) * img->stride + (size_t)x0 * 4, (size_t)W * 4);
+	if (g->backdrop_id && ws_glass_luma) {		/* the average luma (Rec. 709) of the backdrop under the shape (calculate_average_luma), quantised to 1/64 as update_backdrop_luma does: reported when it changes */
+		double acc = 0; long cnt = 0;
+		for (int y = sy - y0; y < sy - y0 + sh; y += 2) for (int x = sx - x0; x < sx - x0 + sw; x += 2) { if (x < 0 || y < 0 || x >= W || y >= H) continue; const uint8_t *p = lv + ((size_t)y * W + x) * 4; acc += 0.2126 * p[2] + 0.7152 * p[1] + 0.0722 * p[0]; cnt++; }
+		float luma = cnt ? (float)(acc / cnt / 255.0) : 0; luma = floorf(luma * 64 + 0.5f) / 64;
+		static struct { uint64_t id; float l; } seen[64]; int k2, slot = -1;
+		for (k2 = 0; k2 < 64; k2++) if (seen[k2].id == g->backdrop_id) { slot = k2; break; }
+		if (slot < 0) for (k2 = 0; k2 < 64; k2++) if (!seen[k2].id) { slot = k2; seen[k2].id = g->backdrop_id; seen[k2].l = -1; break; }
+		if (getenv("WS_GLASS_LUMA_ALL") && *getenv("WS_GLASS_LUMA_ALL")) { static int c3; if (c3++ < 400) fprintf(stderr, "glass_luma %llx %.4f slot %d (%d)\n", (unsigned long long)g->backdrop_id, luma, slot, c3); }
+		if (slot >= 0 && seen[slot].l != luma) { seen[slot].l = luma; ws_glass_luma(g->owner, g->backdrop_id, luma); }
+	}
 	if (g->has_under && !(getenv("WS_GLASS_NO_UNDER") && *getenv("WS_GLASS_NO_UNDER"))) {		/* the tile's vibrantColorMatrix fill, drawn before the glass on the Mac: M (4 x 5) on the backdrop inside the shape, the result added (premultiplied, alpha 0 adds) */
 		float R2 = (float)(g->radius > 0 ? g->radius : 0);
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
@@ -170,6 +180,7 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	putf(G, 240, 1.0f); putf(G, 244, K(g, 0x167, 0)); putf(G, 248, K(g, 0x19e, 0.97f)); putf(G, 252, 1.0f);
 	putf(G, 256, (a != b || b != c || c != d || inner != 0 || outer != 0) ? 1.0f : 0.0f);
 	float edr = 1;
+	if (getenv("WS_GLASS_SHAPES") && *getenv("WS_GLASS_SHAPES")) { static float lastw[64]; static int cnt; int si = (sx * 7 + sy) & 63; if (lastw[si] != K(g, 0x179, 1) && cnt++ < 400) { lastw[si] = K(g, 0x179, 1); fprintf(stderr, "glass_shape %d,%d %dx%d under %d face w %g b %g s %g tint %g %g %g %g blur %g src %g\n", sx, sy, sw, sh, g->has_under, K(g, 0x179, 1), K(g, 0x176, 0), K(g, 0x178, 1), g->p[0x177 - WS_GLASS_KEY0][0], g->p[0x177 - WS_GLASS_KEY0][1], g->p[0x177 - WS_GLASS_KEY0][2], g->p[0x177 - WS_GLASS_KEY0][3], K(g, 0x164, 30), g->src_blur); } }
 	if (getenv("WS_GLASS_DEBUG")) {		/* the keys and what they became, once per shape size */
 		static int done; if (done++ < 2) {
 			fprintf(stderr, "glass_gpu: shape %dx%d r %d region %dx%d levels %d\n", sw, sh, g->radius, W, H, levels);
