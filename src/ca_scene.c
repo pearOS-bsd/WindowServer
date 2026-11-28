@@ -42,6 +42,7 @@ typedef struct {
 	uint64_t subs[MAXS]; int nsubs;
 	uint64_t img;		/* id of the Image object, 0: none */
 	uint64_t bid;			/* a CABackdropLayer: the id of its render BackdropLayer (the luma reports name it) */
+	int tracks_luma;		/* its tracksLuma: bit 2 of the BackdropLayer's Object flags (update_backdrop_luma takes only render backdrops whose word at +0xc & 0x4ff is 0x403: type 3 with that bit, moved to 0x400) */
 	char cls;			/* the class of the layer by its class object: 0 plain, 'E' CASDFElementLayer (0x2f), 'S' CASDFLayer (0x30), 'B' CABackdropLayer (3) */
 	double dd[6]; uint32_t unk[5];	/* the doubles of the record (position, ?, ?, size) and the words between the colour and them */
 	double ccenter[4]; int has_ccenter;	/* contentsCenter: the Vector at index 6 of the extension block's objects (Layer::set_contents_center writes ext + 0x30) */
@@ -118,7 +119,7 @@ static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id =
 
 /* ---- decoder ---- */
 struct shape { int nt, np; uint8_t *types; double *pts; float fill[5]; float stroke[5]; double lw; int rule, cap, join; int has_path; };	/* a CAShapeLayer (CA::Render::ShapeLayer 0x33 with a CA::Render::Path 0x26): the path elements (0 move 1 line 2 quad 3 cubic 4 close) and their points, the fill and stroke colours (5 floats like a layer's), the fill rule */
-typedef struct { int kind; uint64_t id; int attached; const uint8_t *inl; size_t inl_n; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; int qcap; uint64_t bid; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; const uint8_t *inl; size_t inl_n; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; int qcap; uint64_t bid; uint32_t bflags; int32_t bint[4]; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -326,8 +327,8 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	/* the formats below come from the decompilation of QuartzCore (CA::Render::<Class>::<Class>(Decoder*), REA/Ghidra) */
 	case 3: {		/* BackdropLayer: Object flags, vm_size_t, String, 4 x i32, 0x20 bytes, i32, 0x20 bytes, i8 enum */
 		if (ct) ct->cls = 'B';
-		u32(r); { uint64_t bid = u64(r); if (ct) ct->bid = bid; } skip_obj(r, depth + 1, NULL);	/* the vm_size_t: the id the render server reports the backdrop's luma with (BackdropDidChangeLuma: the u64 at +0x10 of the render BackdropLayer; the client looks its CABackdropLayer up by it) */
-		for (int i = 0; i < 4; i++) u32(r);
+		{ uint32_t bf = u32(r); uint64_t bid = u64(r); if (ct) { ct->bid = bid; ct->bflags = bf; } } skip_obj(r, depth + 1, NULL);	/* the vm_size_t: the id the render server reports the backdrop's luma with (BackdropDidChangeLuma: the u64 at +0x10 of the render BackdropLayer; the client looks its CABackdropLayer up by it) */
+		for (int i = 0; i < 4; i++) { uint32_t v = u32(r); if (ct) ct->bint[i] = (int32_t)v; }
 		raw(r, 0x20); u32(r); raw(r, 0x20); u8(r); break; }
 	case 0x2f: u32(r); u8(r); u8(r); u32(r); u32(r); u32(r); u8(r); if (ct) ct->cls = 'E'; break;		/* SDFElementLayer: Object flags, i8 mode, i8 operation, i32 contentsZeroValueDistance, i32 contentsOneValueDistance, i32 gradientOvalization, i8 hitTestsAsFill (Solarium docs/RENDER-STREAM.md) */
 	case 0x30: u32(r); raw(r, 0x70); if (ct) ct->cls = 'S'; break;		/* SDFLayer: Object flags, 0x70 bytes of effect parameters */
@@ -466,7 +467,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		{ const uint8_t *ra = raw(r, 16), *rb = raw(r, 16); if (ra && rb && id && !r->err) { layer_t *lr = get(id); if (lr) { memcpy(lr->rectA, ra, 16); memcpy(lr->rectB, rb, 16); lr->has_rects = 1; } } }
 		u64(r); u64(r); raw(r, 0x14); const uint8_t *sof = raw(r, 8);
 		uint32_t srb = u32(r); if (id && !r->err && sof) { layer_t *ls = get(id); if (ls) { memcpy(ls->shoff, sof, 8); memcpy(&ls->shrad, &srb, 4); ls->has_sh = 1; } }	/* shadowOffset (two floats) and shadowRadius, measured: 4 6 / 8 for .shadow(radius: 8, x: 4, y: 6); the shadow opacity is the byte at pod + 0x15 (0xff = 1.0) */
-		{ uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.bid) lc->bid = cls0.bid; if (cls0.grad) { if (lc->grad) { free(lc->grad->v); free(lc->grad->loc); free(lc->grad); } lc->grad = cls0.grad; } if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
+		{ uint32_t crb = u32(r); float crf; memcpy(&crf, &crb, 4); if (id && !r->err) { layer_t *lc = get(id); if (lc) { lc->cr = crf; lc->cls = cls0.cls; if (cls0.bid) { lc->bid = cls0.bid; lc->tracks_luma = (cls0.bflags & 4) != 0; if (getenv("CA_DEBUG_BFLAGS")) fprintf(stderr, "ca_scene: backdrop %llx flags %#x ints %d %d %d %d\n", (unsigned long long)cls0.bid, cls0.bflags, cls0.bint[0], cls0.bint[1], cls0.bint[2], cls0.bint[3]); } if (cls0.grad) { if (lc->grad) { free(lc->grad->v); free(lc->grad->loc); free(lc->grad); } lc->grad = cls0.grad; } if (cls0.pshape) { if (lc->pshape) { free(lc->pshape->types); free(lc->pshape->pts); free(lc->pshape); } lc->pshape = cls0.pshape; } } } } u32(r); uint32_t bwb = u32(r);
 		{ const uint8_t *bc = raw(r, 0x14); if (id && !r->err && bc) { layer_t *lb = get(id); if (lb) { memcpy(&lb->bw, &bwb, 4); memcpy(lb->bcol, bc, 20); } } }	/* borderWidth (the second word after the corner radius) and the border colour (5 floats), measured against the stream of a SwiftUI stroke: 4.0 and green */
 		for (int i = 0; i < 5; i++) u32(r);
 		raw(r, 0x14); for (int i = 0; i < 5; i++) u32(r);
@@ -847,7 +848,7 @@ static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby
 	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby;
 	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9;
 		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; out[*n].src_blur = gb;
-		out[*n].under_m = NULL; out[*n].backdrop_id = gl ? (gl->bid ? gl->bid : gl->id) : 0;
+		out[*n].under_m = NULL; out[*n].backdrop_id = gl && gl->bid && gl->tracks_luma ? gl->bid : 0;	/* only a backdrop that tracks its luma is reported (the Now Playing module's does not: its glass keeps the light style over a dark backdrop on the Mac) */
 		if (glass_vcm && fabs(glass_vcm->w - l->w) < 1 && fabs(glass_vcm->h - l->h) < 1) { out[*n].under_m = glass_vcm->vcmM; glass_vcm->under_glass = 1; glass_vcm = NULL; }	/* the tile's vibrant fill lies under its glass (same size, drawn before) */
 		(*n)++; }
 	if (l->vcm) glass_vcm = l;

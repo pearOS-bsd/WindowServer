@@ -3,6 +3,7 @@
  * (CA::OGL::GlassBackgroundFilter::render, decompiled: Solarium docs/CONTROLCENTER-GLASS.md has every key, default and uniform).
  * The backdrop goes as a mipmapped texture (the shader samples it with an explicit level for its blur); the result is drawn over the backdrop
  * with premultiplied blending.  0 when the helper or the library is not there: the compositor's own material is drawn instead. */
+#include <time.h>
 #include "ws.h"
 #include "pmwc.h"
 #include <math.h>
@@ -101,11 +102,14 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 		double acc = 0; long cnt = 0;
 		for (int y = sy - y0; y < sy - y0 + sh; y += 2) for (int x = sx - x0; x < sx - x0 + sw; x += 2) { if (x < 0 || y < 0 || x >= W || y >= H) continue; const uint8_t *p = lv + ((size_t)y * W + x) * 4; acc += 0.2126 * p[2] + 0.7152 * p[1] + 0.0722 * p[0]; cnt++; }
 		float luma = cnt ? (float)(acc / cnt / 255.0) : 0; luma = floorf(luma * 64 + 0.5f) / 64;
-		static struct { uint64_t id; float l; } seen[64]; int k2, slot = -1;
+		static struct { uint64_t id; float l; double t; } seen[64]; int k2, slot = -1;
+		struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); double tnow = ts_.tv_sec + ts_.tv_nsec / 1e9;
 		for (k2 = 0; k2 < 64; k2++) if (seen[k2].id == g->backdrop_id) { slot = k2; break; }
 		if (slot < 0) for (k2 = 0; k2 < 64; k2++) if (!seen[k2].id) { slot = k2; seen[k2].id = g->backdrop_id; seen[k2].l = -1; break; }
-		if (getenv("WS_GLASS_LUMA_ALL") && *getenv("WS_GLASS_LUMA_ALL")) { static int c3; if (c3++ < 400) fprintf(stderr, "glass_luma %llx %.4f slot %d (%d)\n", (unsigned long long)g->backdrop_id, luma, slot, c3); }
-		if (slot >= 0 && seen[slot].l != luma) { seen[slot].l = luma; ws_glass_luma(g->owner, g->backdrop_id, luma); }
+		if (getenv("WS_GLASS_LUMA_ALL") && *getenv("WS_GLASS_LUMA_ALL")) { static int c3; if (c3++ < 400) fprintf(stderr, "glass_luma %d,%d %dx%d %.4f\n", sx, sy, sw, sh, luma); }
+		/* update_backdrop_luma samples each tracked backdrop whose group was rendered again (its generation changed) and sends the value every time, changed or not: SwiftUI smooths it over the messages (one message moved inputFaceColorMatrixWhite 0.95 -> 0.9497 and the transition stopped).
+		 * Here a shape is drawn only when its region was damaged, which is that condition; the Mac's sample period (next time rounded to 1/4 s) would need a compose scheduled for later, so every draw sends */
+		if (slot >= 0) { seen[slot].l = luma; seen[slot].t = tnow; ws_glass_luma(g->owner, g->backdrop_id, luma); }
 	}
 	if (g->has_under && !(getenv("WS_GLASS_NO_UNDER") && *getenv("WS_GLASS_NO_UNDER"))) {		/* the tile's vibrantColorMatrix fill, drawn before the glass on the Mac: M (4 x 5) on the backdrop inside the shape, the result added (premultiplied, alpha 0 adds) */
 		float R2 = (float)(g->radius > 0 ? g->radius : 0);
