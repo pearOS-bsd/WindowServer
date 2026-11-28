@@ -1,3 +1,7 @@
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 /* wscarender: the CoreAnimation scene of the commits that carender-stub keeps (ca.bin + ca-ool-<n>-<k>.bin), composed and shown in a window of WindowServer.
  * It is the C port of darwinator/tools/ca/{caparse,ca_scene}.py: decode the command stream of the render server protocol (messages 0x9c42..0x9c45), follow the layers,
  * give every Image its pixels from the out-of-line data, paint the tree.  A client of WindowServer for now; the decoder and the painter (everything above main) are meant to move into the
@@ -73,6 +77,11 @@ static uint8_t *file_ool(void *ctx, int msg, int desc, size_t *sz)
 	fclose(f); *sz = (size_t)n; return p;
 }
 static ca_ool_fn ool_loader = file_ool;
+/* image queues: which image (the ImageQueue object's id) of which scene a queue's memory (message, descriptor) feeds */
+#define MAXQ 32
+static struct { int used, msg, desc; uint64_t imgid; struct scene *scene; } Q[MAXQ];
+static ca_watch_fn queue_watcher;
+void ca_set_queue_watcher(ca_watch_fn fn) { queue_watcher = fn; }
 static void *ool_ctx;
 void ca_set_dir(const char *d) { cadir = d; }
 void ca_set_ool_loader(ca_ool_fn fn, void *ctx) { ool_loader = fn ? fn : file_ool; ool_ctx = ctx; }
@@ -105,7 +114,7 @@ static img_t *getimg(uint64_t id) { for (int i = 0; i < nIM; i++) if (IM[i].id =
 
 /* ---- decoder ---- */
 struct shape { int nt, np; uint8_t *types; double *pts; float fill[5]; float stroke[5]; double lw; int rule, cap, join; int has_path; };	/* a CAShapeLayer (CA::Render::ShapeLayer 0x33 with a CA::Render::Path 0x26): the path elements (0 move 1 line 2 quad 3 cubic 4 close) and their points, the fill and stroke colours (5 floats like a layer's), the fill rule */
-typedef struct { int kind; uint64_t id; int attached; const uint8_t *inl; size_t inl_n; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
+typedef struct { int kind; uint64_t id; int attached; const uint8_t *inl; size_t inl_n; shape_t *pshape; grad_t *grad; int w, h, bpp, stride; uint64_t imgid; char cls; double vec[4]; int nvec; float tint[4]; int has_tint; int32_t shape[4]; int has_shape; int qcap; } contents_t;	/* kind: 0 none, 1 image, 2 reference */
 static int cur_ool_msg;			/* the file number of the message being read, or -1 */
 static int ool_desc[256], n_ool;		/* descriptor indexes of its out-of-line data */
 static int ool_taken;
@@ -273,6 +282,7 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 		if (getenv("CA_DEBUG_EXT")) fprintf(stderr, "ca_scene: filter atom %d of layer %llx%s\n", name, (unsigned long long)g_flayer, have ? " (colour matrix)" : "");
 		break; }
 	case 0x2a: u32(r); u64(r); u64(r); u32(r); u8(r); skip_arr(r, depth, NULL, NULL); if (ct) ct->cls = 'P'; break;		/* PortalLayer (CA::Render::PortalLayer::PortalLayer(Decoder*), disassembled): Object flags, two vm_size_t, i32, i8, an array of objects */
+	case 0x39:		/* Surface in the type table of macOS 26 (Decoder::decode_object): a CAMetalLayer drawable registered with its image queue (CAImageQueueCommit, set_object of the buffer: mode 0, source 1 = an IOSurface port) */
 	case 0x53: {		/* CA::Render::Surface::encode (decompiled): the pixels of a CABackingStore, an IOSurface or a shared memory; see docs: SwiftUI/docs/EVIDENCE.md, 54th pass */
 		uint8_t mode = u8(r); uint32_t w0 = u32(r); int shm = 0;
 		if (mode == 1) { skip_obj(r, depth + 1, NULL); if ((w0 >> 21) & 1) u8(r); }
@@ -329,8 +339,11 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0x3a: u32(r); u32(r); for (int i = 0; i < 5; i++) u64(r); break;	/* Timing: Object flags, i32, 5 x i64 */
 	case 0x3f:		/* WindowLayer: Object flags, vm_size_t, i64, i8 enum */
 		u32(r); u64(r); u64(r); u8(r); break;
-	case 0x19:		/* ImageQueue::decode: Shmem, i32, (a port: no bytes), i32, i32 */
-		skip_obj(r, depth + 1, NULL); u32(r); u32(r); u32(r); break;
+	case 0x19: {		/* ImageQueue::decode (decompiled): Shmem (the queue's memory: a port), i32 capacity, (the client's port: no bytes), i32, i32 */
+		contents_t in; memset(&in, 0, sizeof in);
+		skip_obj(r, depth + 1, &in); uint32_t cap = u32(r); u32(r); u32(r);
+		if (ct && in.attached == 2 && cap > 0 && cap <= 0xffff) { ct->kind = 1; ct->attached = 3; ct->qcap = (int)cap; }
+		break; }
 	default: r->err = 1;
 	}
 }
@@ -376,6 +389,18 @@ static void do_layer(rd *r, int depth, uint64_t id)
 					}
 				}
 				if (im.h > 0 && sz >= (size_t)im.stride * (im.h - 1) + (size_t)im.w * im.bpp) setimg(ct.imgid, &im); else free(px);
+			}
+		} else if (ct.kind == 1 && ct.attached == 3 && cur_ool_msg >= 0) {		/* an image queue: its memory is the next memory-entry port; the side that has it mapped is asked to watch it */
+			uint8_t *px = NULL; size_t sz = 0; int desc = -1;
+			while (px == NULL && port_taken < n_port) { desc = port_desc[port_taken++]; px = ool_loader(ool_ctx, cur_ool_msg, desc, &sz); }
+			if (px) {
+				free(px);
+				int slot = -1;
+				for (int q = 0; q < MAXQ; q++) if (Q[q].used && Q[q].imgid == ct.imgid) slot = q;
+				for (int q = 0; q < MAXQ && slot < 0; q++) if (!Q[q].used) slot = q;
+				if (slot >= 0) { Q[slot].used = 1; Q[slot].msg = cur_ool_msg; Q[slot].desc = desc; Q[slot].imgid = ct.imgid; Q[slot].scene = S; }
+				if (queue_watcher) queue_watcher(cur_ool_msg, desc, ct.qcap);
+				if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx image queue %d/%d, capacity %d\n", (unsigned long long)id, cur_ool_msg, desc, ct.qcap);
 			}
 		} else if (ct.kind == 1 && ct.attached == 0 && ct.inl != NULL && ct.inl_n > 0) {		/* the pixels travel inside the commit stream (a small Image: the label of a Text that changed): a copy of them */
 			uint8_t *px = malloc(ct.inl_n); size_t sz = ct.inl_n;
@@ -844,4 +869,30 @@ void ca_paint_scene(int idx, uint8_t *bgra, int w_, int h_, int stride)
 	for (int j = 0; j < h_; j++) memset(bgra + (size_t)j * stride, 0, (size_t)w_ * 4);
 	if (idx < 0 || idx >= nscenes) return;
 	S = scenes[idx]; paint_scene(&cv);
+}
+
+/* the newest image of a queue is the IOSurface `surface`: its pixels (mapped through darwinator's /dev/iosurface, src/iosurface_dev.h there) become the queue's image */
+struct iosurf_open_ws { uint32_t id; int32_t fd; uint32_t width, height, bytes_per_row, pixel_format, bytes_per_element, pad; uint64_t alloc_size; };
+#define IOSURF_IOC_OPEN_WS 0xc0285301UL
+int ca_queue_frame(int msg, int desc, uint32_t surface)
+{
+	int q;
+	for (q = 0; q < MAXQ; q++) if (Q[q].used && Q[q].msg == msg && Q[q].desc == desc) break;
+	if (q == MAXQ) return -1;
+	static int dfd = -1;
+	if (dfd < 0) dfd = open("/dev/iosurface", O_RDWR);
+	struct iosurf_open_ws io; memset(&io, 0, sizeof io); io.id = surface;
+	if (dfd < 0 || ioctl(dfd, IOSURF_IOC_OPEN_WS, &io) != 0) { if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: IOSurface %u: %s\n", surface, strerror(errno)); return -1; }
+	size_t len = ((size_t)io.alloc_size + 4095) & ~(size_t)4095;
+	uint8_t *m = mmap(NULL, len, PROT_READ, MAP_SHARED, io.fd, 0);
+	close(io.fd);
+	if (m == MAP_FAILED) return -1;
+	int bpp = io.bytes_per_element ? (int)io.bytes_per_element : 4;
+	img_t im; im.w = (int)io.width; im.h = (int)io.height; im.bpp = bpp; im.stride = (int)io.bytes_per_row; im.px = malloc((size_t)im.stride * im.h);
+	if (im.px) memcpy(im.px, m, (size_t)im.stride * im.h);
+	munmap(m, len);
+	if (!im.px) return -1;
+	struct scene *was = S; S = Q[q].scene; setimg(Q[q].imgid, &im); S = was;
+	for (int i = 0; i < nscenes; i++) if (scenes[i] == Q[q].scene) return i;
+	return -1;
 }

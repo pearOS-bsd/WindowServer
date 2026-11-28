@@ -27,4 +27,9 @@ void ca_paint(uint8_t *bgra, int w, int h, int stride);
 int ca_nlayers(void);
 int ca_nimages(void);
 int ca_resynced(void);
+/* image queues (CAImageQueue: CAMetalLayer ...): the render server names the shared memory of a queue that a layer shows (the msg-th message's descriptor desc, capacity slots) to the side that has it mapped,
+ * which then reports the newest image of the queue: ca_queue_frame with its IOSurface id (mapped through /dev/iosurface); returns the scene to repaint or -1 */
+typedef void (*ca_watch_fn)(int msg, int desc, int capacity);
+void ca_set_queue_watcher(ca_watch_fn fn);
+int ca_queue_frame(int msg, int desc, uint32_t surface);
 #endif
