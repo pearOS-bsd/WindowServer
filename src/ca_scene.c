@@ -395,6 +395,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 			while (px == NULL && port_taken < n_port) { desc = port_desc[port_taken++]; px = ool_loader(ool_ctx, cur_ool_msg, desc, &sz); }
 			if (px) {
 				free(px);
+				if (ct.imgid == 0) { ct.imgid = id ^ 0x5149000000000000ULL; l->img = ct.imgid; }	/* an ImageQueue given inline (not an object definition) has no id of its own: the layer's */
 				int slot = -1;
 				for (int q = 0; q < MAXQ; q++) if (Q[q].used && Q[q].imgid == ct.imgid) slot = q;
 				for (int q = 0; q < MAXQ && slot < 0; q++) if (!Q[q].used) slot = q;
