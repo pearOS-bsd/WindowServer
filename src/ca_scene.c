@@ -48,6 +48,7 @@ typedef struct {
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
+	int vcm; float vcmM[20];	/* the layer's vibrantColorMatrix filter (inputColorMatrix, 4 x 5 row-major): what AppKit's glass without the SDF renderer uses (NSGlassEffectView on pearOS) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
 #define MAXSCENES 16
@@ -111,6 +112,10 @@ static int ool_taken;
 static int port_desc[256], n_port, port_taken;	/* the descriptors that are ports (the memory entries of shared pixels), in order */
 
 static void skip_obj(rd *r, int depth, contents_t *ct);
+static uint64_t g_flayer;		/* the layer whose record is being read: its filters (CA::Render::Filter, 0x12) attach to it */
+static layer_t *get(uint64_t id);
+/* an atom of the stream (CA::Render::Decoder::decode_atom): a byte < 0xfe is the atom, 0xfe a u16 atom, 0xff a string (-1 here); the numbers are CAInternAtom's (vibrantColorMatrix 741, inputColorMatrix 364, measured on macOS 26.7.2) */
+static int read_atom(rd *r) { uint8_t b = u8(r); if (b < 0xfe) return b; if (b == 0xfe) return u16(r); { uint64_t n = u64(r); raw(r, n); } return -1; }
 static void skip_arr(rd *r, int depth, uint64_t *ids, int *nids)
 {
 	if (!u8(r)) return;
@@ -246,7 +251,28 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 	case 0x36: { uint32_t n = u32(r); raw(r, n); break; }
 	case 0x3e: { uint32_t n = u32(r); const uint8_t *vp = raw(r, 8ULL * n); if (ct && vp && n >= 4) { memcpy(ct->vec, vp, 32); ct->nvec = 4; } break; }		/* CA::Render::Vector: u32 count, then count doubles */
 	case 0x34: { uint32_t fl = u32(r); if ((fl & 3) == 0) { uint64_t n = u64(r); if (n != 0xffffffffULL && n != ~0ULL) { const uint8_t *ip = raw(r, n); if (ct && ip) { ct->inl = ip; ct->inl_n = (size_t)n; } } else if (ct) ct->attached = 1; } else { uint64_t a0 = u64(r), a1 = u64(r); if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: object 0x34 flags %#x: %llx %llx\n", fl, (unsigned long long)a0, (unsigned long long)a1); if (ct) ct->attached = 2; } break; }
-	case 0x12: { uint32_t fl = u32(r); if ((fl >> 8) & 1) skip_atom(r); else { { uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } } skip_atom(r); skip_obj(r, depth + 1, NULL); skip_arr(r, depth, NULL, NULL); } break; }
+	case 0x12: {		/* CA::Render::Filter::decode: flags; bit 8: the name atom alone; else a kind (0: a CF object), the name atom, an object and the array of its inputs (KeyValue 0x1d: atom, value) */
+		uint32_t fl = u32(r); if ((fl >> 8) & 1) { skip_atom(r); break; }
+		{ uint8_t kind = u8(r); if (kind == 0) { skip_cf(r, 0); break; } if (kind != 1) { r->err = 1; break; } }
+		int name = read_atom(r); skip_obj(r, depth + 1, NULL);
+		float m[20]; int have = 0;
+		if (u8(r)) {
+			uint32_t afl = u32(r), n = u32(r);
+			if (afl & 1) { for (uint32_t i = 0; i < n && !r->err; i++) u64(r); }
+			else for (uint32_t i = 0; i < n && !r->err; i++) {
+				if (r->p < r->n && r->b[r->p] == 0x1d) {
+					u8(r); int key = read_atom(r);
+					if (key == 364 && r->p < r->n && r->b[r->p] == 0x3e) {		/* inputColorMatrix: a Vector of 20 numbers */
+						u8(r); uint32_t vn = u32(r); const uint8_t *vp = raw(r, 8ULL * vn);
+						if (vp && vn == 20) { for (int q = 0; q < 20; q++) { double d; memcpy(&d, vp + 8 * q, 8); m[q] = (float)d; } have = 1; }
+					} else skip_obj(r, depth + 1, NULL);
+				} else skip_obj(r, depth + 1, NULL);
+			}
+		}
+		if (!r->err && name == 741 && have && g_flayer) { layer_t *lf = get(g_flayer); if (lf) { lf->vcm = 1; memcpy(lf->vcmM, m, sizeof m); } }
+		if (getenv("CA_DEBUG_EXT")) fprintf(stderr, "ca_scene: filter atom %d of layer %llx%s\n", name, (unsigned long long)g_flayer, have ? " (colour matrix)" : "");
+		break; }
+	case 0x2a: u32(r); u64(r); u64(r); u32(r); u8(r); skip_arr(r, depth, NULL, NULL); if (ct) ct->cls = 'P'; break;		/* PortalLayer (CA::Render::PortalLayer::PortalLayer(Decoder*), disassembled): Object flags, two vm_size_t, i32, i8, an array of objects */
 	case 0x53: {		/* CA::Render::Surface::encode (decompiled): the pixels of a CABackingStore, an IOSurface or a shared memory; see docs: SwiftUI/docs/EVIDENCE.md, 54th pass */
 		uint8_t mode = u8(r); uint32_t w0 = u32(r); int shm = 0;
 		if (mode == 1) { skip_obj(r, depth + 1, NULL); if ((w0 >> 21) & 1) u8(r); }
@@ -377,6 +403,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 			}
 		}
 	}
+	uint64_t g_saved = g_flayer; g_flayer = id;
 	{
 	uint8_t ext = u8(r);
 	contents_t cls0; memset(&cls0, 0, sizeof cls0);
@@ -401,6 +428,7 @@ static void do_layer(rd *r, int depth, uint64_t id)
 		raw(r, 0x14); u32(r); u64(r); skip_obj(r, depth + 1, NULL); skip_obj(r, depth + 1, NULL); u8(r);
 	}
 	}
+	g_flayer = g_saved;
 }
 
 int ca_resynced(void) { int n = 0; for (int i = 0; i < nscenes; i++) n += scenes[i]->nskipped; return n; }
@@ -557,6 +585,14 @@ static void blend(ca_canvas *win, int x, int y, int r, int g, int b, int a)
 	if (a > 255) a = 255;
 	p[0] = (uint8_t)((p[0] * (255 - a) + b * a) / 255); p[1] = (uint8_t)((p[1] * (255 - a) + g * a) / 255); p[2] = (uint8_t)((p[2] * (255 - a) + r * a) / 255); p[3] = (uint8_t)(a + p[3] * (255 - a) / 255);
 }
+/* premultiplied source over the canvas (premultiplied BGRA): r, g, b, a in 0..1, the colour already multiplied by the alpha; an alpha of 0 with a colour adds it */
+static void blend_pm(ca_canvas *win, int x, int y, double r, double g, double b, double a)
+{
+	if (x < 0 || y < 0 || x >= win->w || y >= win->h) return;
+	uint8_t *p = win->px + (size_t)y * win->stride + x * 4;
+	double k = 1.0 - a, v[4] = { p[0] * k + b * 255, p[1] * k + g * 255, p[2] * k + r * 255, p[3] * k + a * 255 };
+	for (int q = 0; q < 4; q++) p[q] = (uint8_t)(v[q] > 255 ? 255 : v[q] < 0 ? 0 : v[q] + 0.5);
+}
 /* the geometry of a layer as CoreAnimation has it (CA::Render::Layer::compute_frame_offset, decompiled): position (dd[0], dd[1]), bounds origin (dd[2], dd[3]), bounds size (dd[4], dd[5]); the anchor point is (0, 0) when bit 0
  * of the byte at offset 0x33 of the object (the high byte of unk[3]) is set, (0.5, 0.5) otherwise; the frame origin in the parent is position - (anchor * size + bounds origin), and the position of a child is in
  * the bounds space of its parent (the origin of its bounds is the point of the parent's frame origin).  (A layer with an extension block can have another anchor point: not read yet.) */
@@ -654,6 +690,12 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 					double px_ = i + 0.5, py_ = j + 0.5, cx_ = px_ < cr ? cr : (px_ > iw - cr ? iw - cr : px_), cy_ = py_ < cr ? cr : (py_ > ih - cr ? ih - cr : py_);
 					double dx_ = px_ - cx_, dy_ = py_ - cy_, d_ = dx_ * dx_ + dy_ * dy_;
 					if (d_ > 0) { double dist = __builtin_sqrt(d_) - cr + 0.5; cov = dist <= 0 ? 1.0 : (dist >= 1 ? 0.0 : 1.0 - dist); }
+				}
+				if (cov > 0 && l->vcm) {		/* vibrantColorMatrix: the colour goes through the matrix (premultiplied result: an alpha of 0 adds the colour to what is behind, the vibrancy of the Mac) */
+					double ia = a > 0 ? 1.0 / a : 0, c4[4] = { l->col[0] * ia, l->col[1] * ia, l->col[2] * ia, a }, o4[4];
+					for (int q = 0; q < 4; q++) { const float *m = l->vcmM + 5 * q; o4[q] = m[0] * c4[0] + m[1] * c4[1] + m[2] * c4[2] + m[3] * c4[3] + m[4]; o4[q] = o4[q] < 0 ? 0 : o4[q] > 1 ? 1 : o4[q]; }
+					blend_pm(win, bx + i, by + j, o4[0] * cov * op2, o4[1] * cov * op2, o4[2] * cov * op2, o4[3] * cov * op2);
+					continue;
 				}
 				if (cov > 0) { double ia = a > 0 ? 1.0 / a : 0; int fr = (int)(l->col[0] * ia * 255 + 0.5), fg = (int)(l->col[1] * ia * 255 + 0.5), fb = (int)(l->col[2] * ia * 255 + 0.5); blend(win, bx + i, by + j, fr > 255 ? 255 : fr, fg > 255 ? 255 : fg, fb > 255 ? 255 : fb, (int)(a * op2 * cov * 255)); }
 			}

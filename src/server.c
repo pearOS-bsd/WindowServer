@@ -439,13 +439,13 @@ static void place(ws_server *s, window *w, int mode, window *rel)
 	free(v);
 }
 
-extern ws_wid sls_render_bound_window(ws_wid rw);
+extern ws_wid sls_render_bound_window(ws_wid rw) __attribute__((weak));	/* SkyLight/server/sls_carender.c; absent in the unit tests that link server.c alone */
 /* the program that owns a window for the purpose of the keyboard: a render window (owner 0) shows a window of a client program, and that program is its owner */
 static uint32_t key_owner(ws_server *s, ws_wid id)
 {
 	window *w = get(s, id);
 	if (!w) return 0;
-	if (w->owner == 0) { ws_wid b = sls_render_bound_window(id); window *bw = b ? get(s, b) : NULL; if (bw) return bw->owner; }
+	if (w->owner == 0 && sls_render_bound_window) { ws_wid b = sls_render_bound_window(id); window *bw = b ? get(s, b) : NULL; if (bw) return bw->owner; }
 	return w->owner;
 }
 static void set_key_window(ws_server *s, ws_wid id);
