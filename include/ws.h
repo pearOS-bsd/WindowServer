@@ -196,7 +196,10 @@ void ws_cursor_reveal(ws_server *, uint32_t cid);
 /* Renderer interface for GPU compositors: a back-to-front walk over the on-screen windows with everything a renderer needs to draw one
  * (geometry, opacity, corner radius, pixels, shadow layer, damage since the last frame). */
 /* one glass shape: a rounded rectangle (window-relative) of a window and its style (1 regular, 2 clear; 0 = unused slot). A window has up to WS_GLASS_MAX shapes; the compositor melts the ones that touch */
-typedef struct { ws_rect rect; int radius, mode; } ws_glass;
+/* WS_GLASS_KEYS: the keys of a glassBackground filter (CA atoms 0x14d..0x1af, QuartzCore's GlassBackgroundFilter, Solarium docs/CONTROLCENTER-GLASS.md): p[key - 0x14d] = up to 4 numbers; has_params 0 = none (the compositor's own material) */
+#define WS_GLASS_KEY0 0x14d
+#define WS_GLASS_KEYS 100
+typedef struct { ws_rect rect; int radius, mode; int has_params; float p[WS_GLASS_KEYS][4]; unsigned char set[WS_GLASS_KEYS]; } ws_glass;
 #define WS_GLASS_MAX 32
 typedef struct {
 	ws_wid id;
@@ -251,6 +254,8 @@ unsigned long ws_fps_total(void);
 void ws_draw_fps(ws_surface *img);
 int ws_draw_text_small(ws_surface *img, int x, int y, const char *s, int scale);   /* 5x7 font; returns the x after the text */
 void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int origin_x, int origin_y);
+/* the parameters of a glass slot's glassBackground filter (NULL: none) */
+int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set);
 /* the glass material over a rounded rectangle of the screen image: blur, saturation, lens at the edge, specular rim (mode 1 regular, 2 clear) */
 void ws_glass_region(ws_surface *img, ws_rect rect, int radius, int mode);
 int ws_set_window_glass(ws_server *, ws_wid id, ws_rect rect_in_window, int radius, int mode);   /* slot 0; mode 0 removes it */

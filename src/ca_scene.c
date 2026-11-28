@@ -52,6 +52,7 @@ typedef struct {
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
+	float (*gp)[4]; unsigned char *gset;	/* the layer's glassBackground filter (a CABackdropLayer of Liquid Glass): key 0x14d + i -> up to 4 numbers (malloc'd) */
 	int vcm; float vcmM[20];	/* the layer's vibrantColorMatrix filter (inputColorMatrix, 4 x 5 row-major): what AppKit's glass without the SDF renderer uses (NSGlassEffectView on pearOS) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
@@ -92,7 +93,7 @@ void ca_scene_info(int i, int *nlayers, int *nimages) { *nlayers = i >= 0 && i <
 uint32_t ca_scene_ctx(int i) { return i >= 0 && i < nscenes ? scenes[i]->ctx : 0; }
 
 static layer_t *find(uint64_t id) { for (int i = 0; i < nL; i++) if (L[i].used && L[i].id == id) return &L[i]; return NULL; }
-static layer_t *get(uint64_t id) { layer_t *l = find(id); if (l) return l; for (int i = 0; i < nL; i++) if (!L[i].used) { l = &L[i]; goto init; } if (nL >= MAXL) return NULL; l = &L[nL++]; init: memset(l, 0, sizeof *l); l->used = 1; l->id = id; return l; }
+static layer_t *get(uint64_t id) { layer_t *l = find(id); if (l) return l; for (int i = 0; i < nL; i++) if (!L[i].used) { l = &L[i]; goto init; } if (nL >= MAXL) return NULL; l = &L[nL++]; init: free(l->gp); free(l->gset); memset(l, 0, sizeof *l); l->used = 1; l->id = id; return l; }
 
 /* CA_DUMP_IMG=dir: every image that arrives (A8 or BGRA) is written as <dir>/img-<id>-<n>.pgm (A8) or .ppm (BGRA): to see what the render server really got */
 static void dump_img(uint64_t id, const img_t *im)
@@ -271,10 +272,20 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 			else for (uint32_t i = 0; i < n && !r->err; i++) {
 				if (r->p < r->n && r->b[r->p] == 0x1d) {
 					u8(r); int key = read_atom(r);
-					if (key == 364 && r->p < r->n && r->b[r->p] == 0x3e) {		/* inputColorMatrix: a Vector of 20 numbers */
+					if (name == 283 && key >= 0x14d && key < 0x14d + 100 && r->p < r->n && r->b[r->p] == 0x3e && g_flayer) {		/* glassBackground: every value is a Vector (1 number, 2 for a vector, 5 for a colour) */
+						u8(r); uint32_t vn = u32(r); const uint8_t *vp = raw(r, 8ULL * vn);
+						layer_t *lf = get(g_flayer);
+						if (vp && lf) {
+							if (!lf->gp) { lf->gp = calloc(100, sizeof *lf->gp); lf->gset = calloc(100, 1); }
+							if (lf->gp && lf->gset) { for (uint32_t q = 0; q < vn && q < 4; q++) { double d; memcpy(&d, vp + 8 * q, 8); lf->gp[key - 0x14d][q] = (float)d; } lf->gset[key - 0x14d] = 1; }
+						}
+					} else if (key == 364 && r->p < r->n && r->b[r->p] == 0x3e) {		/* inputColorMatrix: a Vector of 20 numbers */
 						u8(r); uint32_t vn = u32(r); const uint8_t *vp = raw(r, 8ULL * vn);
 						if (vp && vn == 20) { for (int q = 0; q < 20; q++) { double d; memcpy(&d, vp + 8 * q, 8); m[q] = (float)d; } have = 1; }
-					} else skip_obj(r, depth + 1, NULL);
+					} else {
+						if (name == 283 && getenv("CA_DEBUG_GLASS") && r->p + 12 <= r->n) { fprintf(stderr, "ca_scene: glassBackground key %d (%#x): type %#x bytes", key, key, r->b[r->p]); for (int q = 1; q < 12; q++) fprintf(stderr, " %02x", r->b[r->p + q]); fprintf(stderr, "\n"); }
+						skip_obj(r, depth + 1, NULL);
+					}
 				} else skip_obj(r, depth + 1, NULL);
 			}
 		}
@@ -817,17 +828,20 @@ static void paint_scene(ca_canvas *win)
 	for (int i = 0; i < nr; i++) paint_layer(win, roots[i], 0, 0, 0, 0, 1.0, 0);
 }
 /* The glass of a context: the rectangles of the CASDFElementLayers (the shapes of the Liquid Glass of macOS 26: NSGlassEffectView / SwiftUI glassEffect put them under a CABackdropLayer with the glassBackground filter), in the window of the context (origin at the top left), with their corner radius. */
-static void glass_walk(uint64_t id, double ox, double oy, int H, ca_glass *out, int max, int *n, int depth)
+/* The glass parameters of a shape: the glassBackground filter of the CABackdropLayer drawn before it (SwiftUI puts the backdrop with the filter beside the SDFLayer of the shapes, in front of it in the sublayers) */
+static void glass_walk(uint64_t id, double ox, double oy, int H, ca_glass *out, int max, int *n, int depth, const layer_t *gl)
 {
 	layer_t *l = find(id); if (!l || depth > 64) return;
 	double x = ox + l->px_ - l->w / 2, y = oy + l->py_ - l->h / 2;
-	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9; (*n)++; }
-	for (int i = 0; i < l->nsubs; i++) glass_walk(l->subs[i], x, y, H, out, max, n, depth + 1);
+	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9;
+		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; (*n)++; }
+	if (l->gp) gl = l;
+	for (int i = 0; i < l->nsubs; i++) { layer_t *c = find(l->subs[i]); glass_walk(l->subs[i], x, y, H, out, max, n, depth + 1, gl); if (c && c->gp) gl = c; }
 }
 int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
 {
 	int n = 0; if (scene < 0 || scene >= nscenes || root < 0 || root >= scenes[scene]->nroots) return 0;
-	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, height, out, max, &n, 0); return n;
+	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, height, out, max, &n, 0, NULL); return n;
 }
 
 /* position and size of the root layer of a root of a scene (the content of the window that its context is bound to: the layer's position is the window's origin in the coordinates of the screen's top-left corner, as far as known) */

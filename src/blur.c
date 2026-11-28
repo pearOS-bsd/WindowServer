@@ -183,9 +183,15 @@ static float glass_intensity(void)
 	else { FILE *f = fopen("/var/tmp/wsd-glass-intensity", "r"); if (f) { float x; if (fscanf(f, "%f", &x) == 1) v = x; fclose(f); } else v = 1.0f; }
 	if (v < 0) v = 0; if (v > 3) v = 3; return v;
 }
+int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy);	/* glass_gpu.c: QuartzCore's own glass shaders through the Metal helper */
 void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 {
 	if (!img || !g || n <= 0) return;
+	{	/* shapes with their glassBackground parameters: drawn by QuartzCore's shaders when the Metal helper is there (each shape on its own; the others keep the compositor's material) */
+		static ws_glass rest[WS_GLASS_MAX]; int k = 0, any = 0;
+		for (int i = 0; i < n; i++) { if ((g[i].mode == 9 || g[i].mode == 10) && g[i].has_params && ws_glass_gpu(img, &g[i], ox, oy)) any = 1; else if (k < WS_GLASS_MAX) rest[k++] = g[i]; }
+		if (any) { if (k > 0) ws_glass_regions(img, rest, k, ox, oy); return; }
+	}
 	{	/* regular glass of different layers (a panel and the controls on it): the panel first, then each control on its own, so that a control sees the panel's glass as its backdrop, as separate NSGlassEffectViews do (inside one container the shapes melt instead) */
 		static int in_pass; int n9 = 0, n10 = 0; for (int i = 0; i < n; i++) { if (g[i].mode == 9) n9++; else if (g[i].mode == 10) n10++; }
 		if (!in_pass && n9 && n10) {

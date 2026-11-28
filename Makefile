@@ -4,7 +4,9 @@ CFLAGS  ?= -O2 -g
 # SkyLight (github.com/pearOS-bsd/SkyLight): the SLS wire headers, the server handlers (server/sls_*.c), the client shim (client/skylight.c)
 SKYLIGHT ?= ../SkyLight
 COREUI ?= ../CoreUI
-CFLAGS  += -std=c99 -D_DEFAULT_SOURCE -D_BSD_SOURCE -Wall -Wextra -Iinclude -Isrc -I$(SKYLIGHT)/include -I$(SKYLIGHT)/server
+# Metal (github.com/pearOS-bsd/Metal): client/pmwc.c, the client of pear-metal-helper (Liquid Glass with QuartzCore's shaders, src/glass_gpu.c)
+METAL ?= ../Metal
+CFLAGS  += -std=c99 -D_DEFAULT_SOURCE -D_BSD_SOURCE -Wall -Wextra -Iinclude -Isrc -I$(SKYLIGHT)/include -I$(SKYLIGHT)/server -I$(METAL)/client
 LDLIBS   = -lm -lpthread
 CORE     = src/input.c src/keymap.c src/cursor.c src/fps.c src/compositor_sw.c src/blur.c src/server.c src/shadow.c src/region.c src/ipc.c src/evrec.c src/buffer.c
 HDRS = include/ws_gl.h include/ws_buffer.h include/ws_evrec.h include/ws.h include/ws_client.h include/ws_backend.h include/ws_ipc.h include/ws_region.h include/mach_compat.h $(SKYLIGHT)/include/sls_wire.h $(SKYLIGHT)/include/sls_msgids.h src/wsd_priv.h $(SKYLIGHT)/server/sls_zero_ndr.h src/bplist.h
@@ -17,8 +19,8 @@ EXTRA_LIBS   =
 
 all: WindowServer test_bplist test_window test_interactive test_robust test_compose test_region test_wire test_evrec test_buffer test_diff
 
-WindowServer: $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c $(HDRS)
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c $(EXTRA_LIBS) $(LDLIBS) $$([ "$$(uname -s)" = Darwin ] || echo -lcrypto) -lz
+WindowServer: $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c src/glass_gpu.c $(METAL)/client/pmwc.c $(HDRS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(CORE) $(EXTRA_SRC) $(FAMILIES) src/wsd.c src/glass_gpu.c $(METAL)/client/pmwc.c $(EXTRA_LIBS) $(LDLIBS) $$([ "$$(uname -s)" = Darwin ] || echo -lcrypto) -lz
 
 test_interactive: src/client.c src/compositor_sw.c src/region.c src/ipc.c src/evrec.c src/buffer.c test/test_interactive.c $(HDRS)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ src/client.c src/compositor_sw.c src/region.c src/ipc.c src/evrec.c src/buffer.c test/test_interactive.c $(EXTRA_LIBS) $(LDLIBS)
