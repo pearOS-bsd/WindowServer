@@ -97,8 +97,13 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	if (!src || !dst) { if (getenv("WS_GLASS_DEBUG")) fprintf(stderr, "glass_gpu: textures %dx%d levels %d: %llx %llx\n", W, H, levels, (unsigned long long)src, (unsigned long long)dst); pmwc_release(src); pmwc_release(dst); return 0; }
 	uint8_t *lv = malloc((size_t)W * H * 4), *nx = malloc((size_t)W * H * 4);
 	for (int y = 0; y < H; y++) memcpy(lv + (size_t)y * W * 4, img->px + (size_t)(y0 + y) * img->stride + (size_t)x0 * 4, (size_t)W * 4);
+	pmwc_texture_replace(dst, (uint32_t)W, (uint32_t)H, lv, (uint64_t)W * 4);	/* the target: the backdrop as it is */
+	if (g->src_blur > 0) {		/* the glass reads its container's gaussianBlur backdrop (inputRadius; sigma = radius / WS_GLASS_BLUR_DIV, 2 by default) */
+		float div = getenv("WS_GLASS_BLUR_DIV") ? (float)atof(getenv("WS_GLASS_BLUR_DIV")) : 2.0f;
+		ws_surface t = { 0 }; t.w = W; t.h = H; t.stride = (size_t)W * 4; t.px = lv;
+		ws_blur_region(&t, (ws_rect){ 0, 0, W, H }, (ws_rect){ 0, 0, W, H }, g->src_blur / div);
+	}
 	pmwc_texture_replace(src, (uint32_t)W, (uint32_t)H, lv, (uint64_t)W * 4);
-	pmwc_texture_replace(dst, (uint32_t)W, (uint32_t)H, lv, (uint64_t)W * 4);
 	int lw = W, lh = H;
 	for (int l = 1; l < levels; l++) {
 		int nw = lw > 1 ? lw / 2 : 1, nh = lh > 1 ? lh / 2 : 1;

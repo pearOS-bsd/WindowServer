@@ -1395,12 +1395,12 @@ int ws_set_window_glass_slot(ws_server *s, ws_wid id, int slot, ws_rect r, int r
 	}
 	return 0;
 }
-int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set)
+int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set, float src_blur)
 {
 	window *w = get(s, id); if (!w || slot < 0 || slot >= WS_GLASS_MAX) return -1;
 	ws_glass *g = &w->glass[slot];
 	if (!p) { if (g->has_params) { g->has_params = 0; bump(s); } return 0; }
-	if (!g->has_params || memcmp(g->p, p, sizeof g->p) || memcmp(g->set, set, sizeof g->set)) { memcpy(g->p, p, sizeof g->p); memcpy(g->set, set, sizeof g->set); g->has_params = 1; bump(s); }
+	if (!g->has_params || memcmp(g->p, p, sizeof g->p) || memcmp(g->set, set, sizeof g->set) || g->src_blur != src_blur) { memcpy(g->p, p, sizeof g->p); memcpy(g->set, set, sizeof g->set); g->src_blur = src_blur; g->has_params = 1; bump(s); }
 	return 0;
 }
 int ws_set_window_glass(ws_server *s, ws_wid id, ws_rect r, int radius, int mode) { return ws_set_window_glass_slot(s, id, 0, r, radius, mode); }

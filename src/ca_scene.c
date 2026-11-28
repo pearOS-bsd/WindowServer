@@ -52,7 +52,8 @@ typedef struct {
 	float tint[4]; int has_tint;	/* the colour of an alpha-only Image (see texture_tail) */
 	float rectA[4], rectB[4]; int has_rects;	/* the two 16 byte records of the extension block (contentsRect / contentsCenter?) */
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
-	float (*gp)[4]; unsigned char *gset;	/* the layer's glassBackground filter (a CABackdropLayer of Liquid Glass): key 0x14d + i -> up to 4 numbers (malloc'd) */
+	float (*gp)[4]; unsigned char *gset;
+	float gblur;	/* the inputRadius of the layer's gaussianBlur filter (atom 280, key 400), 0 none */	/* the layer's glassBackground filter (a CABackdropLayer of Liquid Glass): key 0x14d + i -> up to 4 numbers (malloc'd) */
 	int vcm; float vcmM[20];	/* the layer's vibrantColorMatrix filter (inputColorMatrix, 4 x 5 row-major): what AppKit's glass without the SDF renderer uses (NSGlassEffectView on pearOS) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
@@ -279,17 +280,21 @@ static void skip_obj_(rd *r, int depth, contents_t *ct)
 							if (!lf->gp) { lf->gp = calloc(100, sizeof *lf->gp); lf->gset = calloc(100, 1); }
 							if (lf->gp && lf->gset) { for (uint32_t q = 0; q < vn && q < 4; q++) { double d; memcpy(&d, vp + 8 * q, 8); lf->gp[key - 0x14d][q] = (float)d; } lf->gset[key - 0x14d] = 1; }
 						}
+					} else if (name == 280 && key == 400 && r->p < r->n && r->b[r->p] == 0x3e && g_flayer) {		/* gaussianBlur inputRadius */
+						u8(r); uint32_t vn = u32(r); const uint8_t *vp = raw(r, 8ULL * vn);
+						layer_t *lf = get(g_flayer); if (vp && vn >= 1 && lf) { double d; memcpy(&d, vp, 8); lf->gblur = (float)d; }
 					} else if (key == 364 && r->p < r->n && r->b[r->p] == 0x3e) {		/* inputColorMatrix: a Vector of 20 numbers */
 						u8(r); uint32_t vn = u32(r); const uint8_t *vp = raw(r, 8ULL * vn);
 						if (vp && vn == 20) { for (int q = 0; q < 20; q++) { double d; memcpy(&d, vp + 8 * q, 8); m[q] = (float)d; } have = 1; }
 					} else {
-						if (name == 283 && getenv("CA_DEBUG_GLASS") && r->p + 12 <= r->n) { fprintf(stderr, "ca_scene: glassBackground key %d (%#x): type %#x bytes", key, key, r->b[r->p]); for (int q = 1; q < 12; q++) fprintf(stderr, " %02x", r->b[r->p + q]); fprintf(stderr, "\n"); }
+						if ((name == 283 || name == 280 || name == 627) && getenv("CA_DEBUG_GLASS") && r->p + 12 <= r->n) { fprintf(stderr, "ca_scene: filter %d of layer %llx key %d (%#x): type %#x bytes", name, (unsigned long long)g_flayer, key, key, r->b[r->p]); for (int q = 1; q < 14 && r->p + q < r->n; q++) fprintf(stderr, " %02x", r->b[r->p + q]); if (r->b[r->p] == 0x3e) { double dv; memcpy(&dv, r->b + r->p + 5, 8); fprintf(stderr, " = %g", dv); } fprintf(stderr, "\n"); }
 						skip_obj(r, depth + 1, NULL);
 					}
 				} else skip_obj(r, depth + 1, NULL);
 			}
 		}
-		if (!r->err && name == 741 && have && g_flayer) { layer_t *lf = get(g_flayer); if (lf) { lf->vcm = 1; memcpy(lf->vcmM, m, sizeof m); } }
+		if (!r->err && name == 741 && have && g_flayer) { layer_t *lf = get(g_flayer); if (lf) { lf->vcm = 1; memcpy(lf->vcmM, m, sizeof m); }
+			if (getenv("CA_DEBUG_VCM")) { fprintf(stderr, "ca_scene: vibrantColorMatrix of %llx:", (unsigned long long)g_flayer); for (int q = 0; q < 20; q++) fprintf(stderr, " %.4g", m[q]); fprintf(stderr, "\n"); } }
 		if (getenv("CA_DEBUG_EXT")) fprintf(stderr, "ca_scene: filter atom %d of layer %llx%s\n", name, (unsigned long long)g_flayer, have ? " (colour matrix)" : "");
 		break; }
 	case 0x2a: u32(r); u64(r); u64(r); u32(r); u8(r); skip_arr(r, depth, NULL, NULL); if (ct) ct->cls = 'P'; break;		/* PortalLayer (CA::Render::PortalLayer::PortalLayer(Decoder*), disassembled): Object flags, two vm_size_t, i32, i8, an array of objects */
@@ -729,7 +734,7 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 					double dx_ = px_ - cx_, dy_ = py_ - cy_, d_ = dx_ * dx_ + dy_ * dy_;
 					if (d_ > 0) { double dist = __builtin_sqrt(d_) - cr + 0.5; cov = dist <= 0 ? 1.0 : (dist >= 1 ? 0.0 : 1.0 - dist); }
 				}
-				if (cov > 0 && l->vcm) {		/* vibrantColorMatrix: the colour goes through the matrix (premultiplied result: an alpha of 0 adds the colour to what is behind, the vibrancy of the Mac) */
+				if (cov > 0 && l->vcm && !getenv("CA_NO_VCM")) {		/* vibrantColorMatrix: the colour goes through the matrix (premultiplied result: an alpha of 0 adds the colour to what is behind, the vibrancy of the Mac) */
 					double ia = a > 0 ? 1.0 / a : 0, c4[4] = { l->col[0] * ia, l->col[1] * ia, l->col[2] * ia, a }, o4[4];
 					for (int q = 0; q < 4; q++) { const float *m = l->vcmM + 5 * q; o4[q] = m[0] * c4[0] + m[1] * c4[1] + m[2] * c4[2] + m[3] * c4[3] + m[4]; o4[q] = o4[q] < 0 ? 0 : o4[q] > 1 ? 1 : o4[q]; }
 					blend_pm(win, bx + i, by + j, o4[0] * cov * op2, o4[1] * cov * op2, o4[2] * cov * op2, o4[3] * cov * op2);
@@ -829,7 +834,7 @@ static void paint_scene(ca_canvas *win)
 }
 /* The glass of a context: the rectangles of the CASDFElementLayers (the shapes of the Liquid Glass of macOS 26: NSGlassEffectView / SwiftUI glassEffect put them under a CABackdropLayer with the glassBackground filter), in the window of the context (origin at the top left), with their corner radius. */
 /* The glass parameters of a shape: the glassBackground filter of the CABackdropLayer drawn before it (SwiftUI puts the backdrop with the filter beside the SDFLayer of the shapes, in front of it in the sublayers) */
-static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby, int pflip, double ph, int H, ca_glass *out, int max, int *n, int depth, const layer_t *gl)
+static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby, int pflip, double ph, int H, ca_glass *out, int max, int *n, int depth, const layer_t *gl, float gb)
 {
 	layer_t *l = find(id); if (!l || depth > 64) return;
 	/* the frame of the layer as paint_layer_f has it (CA::Render::Layer::compute_frame_offset): position - (anchor * size + bounds origin), in the parent's bounds space, flipped in a flipped parent */
@@ -837,14 +842,15 @@ static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby
 	if (pflip && depth > 0) fy = ph - (fy + l->h);
 	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby;
 	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9;
-		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; (*n)++; }
+		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; out[*n].src_blur = gb; (*n)++; }
 	if (l->gp) gl = l;
-	for (int i = 0; i < l->nsubs; i++) { layer_t *c = find(l->subs[i]); glass_walk(l->subs[i], x, y, l->dd[2], l->dd[3], (l->unk[2] & 0x800) != 0, l->h, H, out, max, n, depth + 1, gl); if (c && c->gp) gl = c; }
+	if (l->gblur > 0) gb = l->gblur;
+	for (int i = 0; i < l->nsubs; i++) { layer_t *c = find(l->subs[i]); glass_walk(l->subs[i], x, y, l->dd[2], l->dd[3], (l->unk[2] & 0x800) != 0, l->h, H, out, max, n, depth + 1, gl, gb); if (c && c->gp) gl = c; if (c && c->gblur > 0) gb = c->gblur; }
 }
 int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
 {
 	int n = 0; if (scene < 0 || scene >= nscenes || root < 0 || root >= scenes[scene]->nroots) return 0;
-	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, 0, 0, 0, 0, height, out, max, &n, 0, NULL); return n;
+	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, 0, 0, 0, 0, height, out, max, &n, 0, NULL, 0); return n;
 }
 
 /* position and size of the root layer of a root of a scene (the content of the window that its context is bound to: the layer's position is the window's origin in the coordinates of the screen's top-left corner, as far as known) */

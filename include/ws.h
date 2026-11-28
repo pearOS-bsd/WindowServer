@@ -199,7 +199,7 @@ void ws_cursor_reveal(ws_server *, uint32_t cid);
 /* WS_GLASS_KEYS: the keys of a glassBackground filter (CA atoms 0x14d..0x1af, QuartzCore's GlassBackgroundFilter, Solarium docs/CONTROLCENTER-GLASS.md): p[key - 0x14d] = up to 4 numbers; has_params 0 = none (the compositor's own material) */
 #define WS_GLASS_KEY0 0x14d
 #define WS_GLASS_KEYS 100
-typedef struct { ws_rect rect; int radius, mode; int has_params; float p[WS_GLASS_KEYS][4]; unsigned char set[WS_GLASS_KEYS]; } ws_glass;
+typedef struct { ws_rect rect; int radius, mode; int has_params; float p[WS_GLASS_KEYS][4]; unsigned char set[WS_GLASS_KEYS]; float src_blur; } ws_glass;	/* src_blur: the inputRadius of the gaussianBlur backdrop the shape's glass reads (SwiftUI's container: its blur feeds the glass and is not drawn itself), 0 none */
 #define WS_GLASS_MAX 32
 typedef struct {
 	ws_wid id;
@@ -255,7 +255,7 @@ void ws_draw_fps(ws_surface *img);
 int ws_draw_text_small(ws_surface *img, int x, int y, const char *s, int scale);   /* 5x7 font; returns the x after the text */
 void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int origin_x, int origin_y);
 /* the parameters of a glass slot's glassBackground filter (NULL: none) */
-int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set);
+int ws_set_window_glass_params(ws_server *s, ws_wid id, int slot, const float (*p)[4], const unsigned char *set, float src_blur);
 /* the glass material over a rounded rectangle of the screen image: blur, saturation, lens at the edge, specular rim (mode 1 regular, 2 clear) */
 void ws_glass_region(ws_surface *img, ws_rect rect, int radius, int mode);
 int ws_set_window_glass(ws_server *, ws_wid id, ws_rect rect_in_window, int radius, int mode);   /* slot 0; mode 0 removes it */
