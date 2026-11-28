@@ -400,7 +400,8 @@ static void do_layer(rd *r, int depth, uint64_t id)
 				for (int q = 0; q < MAXQ; q++) if (Q[q].used && Q[q].imgid == ct.imgid) slot = q;
 				for (int q = 0; q < MAXQ && slot < 0; q++) if (!Q[q].used) slot = q;
 				if (slot >= 0) { Q[slot].used = 1; Q[slot].msg = cur_ool_msg; Q[slot].desc = desc; Q[slot].imgid = ct.imgid; Q[slot].scene = S; }
-				if (queue_watcher) queue_watcher(cur_ool_msg, desc, ct.qcap);
+				int pdesc = port_taken < n_port ? port_desc[port_taken] : -1;	/* ImageQueue::decode reads the client's port after the Shmem: the next port descriptor */
+				if (queue_watcher) queue_watcher(cur_ool_msg, desc, ct.qcap, pdesc);
 				if (getenv("CA_DEBUG")) fprintf(stderr, "ca_scene: layer %llx image queue %d/%d, capacity %d\n", (unsigned long long)id, cur_ool_msg, desc, ct.qcap);
 			}
 		} else if (ct.kind == 1 && ct.attached == 0 && ct.inl != NULL && ct.inl_n > 0) {		/* the pixels travel inside the commit stream (a small Image: the label of a Text that changed): a copy of them */
