@@ -54,7 +54,8 @@ typedef struct {
 	float cr;			/* cornerRadius (the record of a layer with an extension block) */
 	float (*gp)[4]; unsigned char *gset;
 	float gblur;	/* the inputRadius of the layer's gaussianBlur filter (atom 280, key 400), 0 none */	/* the layer's glassBackground filter (a CABackdropLayer of Liquid Glass): key 0x14d + i -> up to 4 numbers (malloc'd) */
-	int vcm; float vcmM[20];	/* the layer's vibrantColorMatrix filter (inputColorMatrix, 4 x 5 row-major): what AppKit's glass without the SDF renderer uses (NSGlassEffectView on pearOS) */
+	int vcm; float vcmM[20];
+	int under_glass;	/* a vibrantColorMatrix layer drawn before the glass of its shape: the glass applies it to its backdrop, the painter leaves it out */	/* the layer's vibrantColorMatrix filter (inputColorMatrix, 4 x 5 row-major): what AppKit's glass without the SDF renderer uses (NSGlassEffectView on pearOS) */
 } layer_t;
 typedef struct { uint64_t id; img_t im; } imgent_t;
 #define MAXSCENES 16
@@ -734,7 +735,8 @@ static void paint_layer_f(ca_canvas *win, uint64_t id, double ox, double oy, dou
 					double dx_ = px_ - cx_, dy_ = py_ - cy_, d_ = dx_ * dx_ + dy_ * dy_;
 					if (d_ > 0) { double dist = __builtin_sqrt(d_) - cr + 0.5; cov = dist <= 0 ? 1.0 : (dist >= 1 ? 0.0 : 1.0 - dist); }
 				}
-				if (cov > 0 && l->vcm && !getenv("CA_NO_VCM")) {		/* vibrantColorMatrix: the colour goes through the matrix (premultiplied result: an alpha of 0 adds the colour to what is behind, the vibrancy of the Mac) */
+				if (cov > 0 && l->vcm && l->under_glass) continue;		/* applied by the glass to its backdrop (glass_walk) */
+				if (cov > 0 && l->vcm && !(getenv("CA_NO_VCM") && *getenv("CA_NO_VCM"))) {		/* vibrantColorMatrix: the colour goes through the matrix (premultiplied result: an alpha of 0 adds the colour to what is behind, the vibrancy of the Mac) */
 					double ia = a > 0 ? 1.0 / a : 0, c4[4] = { l->col[0] * ia, l->col[1] * ia, l->col[2] * ia, a }, o4[4];
 					for (int q = 0; q < 4; q++) { const float *m = l->vcmM + 5 * q; o4[q] = m[0] * c4[0] + m[1] * c4[1] + m[2] * c4[2] + m[3] * c4[3] + m[4]; o4[q] = o4[q] < 0 ? 0 : o4[q] > 1 ? 1 : o4[q]; }
 					blend_pm(win, bx + i, by + j, o4[0] * cov * op2, o4[1] * cov * op2, o4[2] * cov * op2, o4[3] * cov * op2);
@@ -834,6 +836,7 @@ static void paint_scene(ca_canvas *win)
 }
 /* The glass of a context: the rectangles of the CASDFElementLayers (the shapes of the Liquid Glass of macOS 26: NSGlassEffectView / SwiftUI glassEffect put them under a CABackdropLayer with the glassBackground filter), in the window of the context (origin at the top left), with their corner radius. */
 /* The glass parameters of a shape: the glassBackground filter of the CABackdropLayer drawn before it (SwiftUI puts the backdrop with the filter beside the SDFLayer of the shapes, in front of it in the sublayers) */
+static layer_t *glass_vcm;	/* the last vibrantColorMatrix layer met in the walk (drawn before what follows it) */
 static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby, int pflip, double ph, int H, ca_glass *out, int max, int *n, int depth, const layer_t *gl, float gb)
 {
 	layer_t *l = find(id); if (!l || depth > 64) return;
@@ -842,7 +845,11 @@ static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby
 	if (pflip && depth > 0) fy = ph - (fy + l->h);
 	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby;
 	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9;
-		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; out[*n].src_blur = gb; (*n)++; }
+		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; out[*n].src_blur = gb;
+		out[*n].under_m = NULL;
+		if (glass_vcm && fabs(glass_vcm->w - l->w) < 1 && fabs(glass_vcm->h - l->h) < 1) { out[*n].under_m = glass_vcm->vcmM; glass_vcm->under_glass = 1; glass_vcm = NULL; }	/* the tile's vibrant fill lies under its glass (same size, drawn before) */
+		(*n)++; }
+	if (l->vcm) glass_vcm = l;
 	if (l->gp) gl = l;
 	if (l->gblur > 0) gb = l->gblur;
 	for (int i = 0; i < l->nsubs; i++) { layer_t *c = find(l->subs[i]); glass_walk(l->subs[i], x, y, l->dd[2], l->dd[3], (l->unk[2] & 0x800) != 0, l->h, H, out, max, n, depth + 1, gl, gb); if (c && c->gp) gl = c; if (c && c->gblur > 0) gb = c->gblur; }
@@ -850,7 +857,7 @@ static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby
 int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
 {
 	int n = 0; if (scene < 0 || scene >= nscenes || root < 0 || root >= scenes[scene]->nroots) return 0;
-	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, 0, 0, 0, 0, height, out, max, &n, 0, NULL, 0); return n;
+	S = scenes[scene]; glass_vcm = NULL; glass_walk(S->rootid[root], 0, 0, 0, 0, 0, 0, height, out, max, &n, 0, NULL, 0); return n;
 }
 
 /* position and size of the root layer of a root of a scene (the content of the window that its context is bound to: the layer's position is the window's origin in the coordinates of the screen's top-left corner, as far as known) */

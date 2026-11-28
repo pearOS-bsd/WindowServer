@@ -97,6 +97,23 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	if (!src || !dst) { if (getenv("WS_GLASS_DEBUG")) fprintf(stderr, "glass_gpu: textures %dx%d levels %d: %llx %llx\n", W, H, levels, (unsigned long long)src, (unsigned long long)dst); pmwc_release(src); pmwc_release(dst); return 0; }
 	uint8_t *lv = malloc((size_t)W * H * 4), *nx = malloc((size_t)W * H * 4);
 	for (int y = 0; y < H; y++) memcpy(lv + (size_t)y * W * 4, img->px + (size_t)(y0 + y) * img->stride + (size_t)x0 * 4, (size_t)W * 4);
+	if (g->has_under && !(getenv("WS_GLASS_NO_UNDER") && *getenv("WS_GLASS_NO_UNDER"))) {		/* the tile's vibrantColorMatrix fill, drawn before the glass on the Mac: M (4 x 5) on the backdrop inside the shape, the result added (premultiplied, alpha 0 adds) */
+		float R2 = (float)(g->radius > 0 ? g->radius : 0);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+			float px_ = x0 + x + 0.5f - sx, py_ = y0 + y + 0.5f - sy;
+			if (px_ < 0 || py_ < 0 || px_ > sw || py_ > sh) continue;
+			float cx_ = px_ < R2 ? R2 : px_ > sw - R2 ? sw - R2 : px_, cy_ = py_ < R2 ? R2 : py_ > sh - R2 ? sh - R2 : py_, dx_ = px_ - cx_, dy_ = py_ - cy_;
+			float d_ = sqrtf(dx_ * dx_ + dy_ * dy_) - R2 + 0.5f, cov = d_ <= 0 ? 1 : d_ >= 1 ? 0 : 1 - d_;
+			if (cov <= 0) continue;
+			uint8_t *p = lv + ((size_t)y * W + x) * 4; float c[4] = { p[2] / 255.0f, p[1] / 255.0f, p[0] / 255.0f, p[3] / 255.0f }, o[4];
+			for (int k = 0; k < 4; k++) { const float *m = g->under_m + 5 * k; o[k] = m[0] * c[0] + m[1] * c[1] + m[2] * c[2] + m[3] * c[3] + m[4]; o[k] = o[k] < 0 ? 0 : o[k] > 1 ? 1 : o[k]; }
+			/* the strength: QuartzCore reduces a vibrant fill under glass (vibrancy_strength_reduction, inlined in prepare_layer_image: not decompiled yet); 0.3 is measured
+			 * against the Mac over identical backdrops (without it -6, with all of it +14 per channel) */
+			static float K = -1; if (K < 0) K = getenv("WS_GLASS_UNDER_K") ? (float)atof(getenv("WS_GLASS_UNDER_K")) : 0.3f;
+			for (int k = 0; k < 3; k++) { float v = c[k] + K * (o[k] * cov - c[k] * o[3] * cov); c[k] = v > 1 ? 1 : v < 0 ? 0 : v; }
+			p[2] = (uint8_t)(c[0] * 255 + 0.5f); p[1] = (uint8_t)(c[1] * 255 + 0.5f); p[0] = (uint8_t)(c[2] * 255 + 0.5f);
+		}
+	}
 	pmwc_texture_replace(dst, (uint32_t)W, (uint32_t)H, lv, (uint64_t)W * 4);	/* the target: the backdrop as it is */
 	if (g->src_blur > 0) {		/* the glass reads its container's gaussianBlur backdrop (inputRadius; sigma = radius / WS_GLASS_BLUR_DIV, 2 by default) */
 		float div = getenv("WS_GLASS_BLUR_DIV") ? (float)atof(getenv("WS_GLASS_BLUR_DIV")) : 2.0f;
