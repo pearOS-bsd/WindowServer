@@ -189,6 +189,7 @@ void ws_glass_regions(ws_surface *img, const ws_glass *g, int n, int ox, int oy)
 	if (!img || !g || n <= 0) return;
 	{	/* shapes with their glassBackground parameters: drawn by QuartzCore's shaders when the Metal helper is there (each shape on its own; the others keep the compositor's material) */
 		static ws_glass rest[WS_GLASS_MAX]; int k = 0, any = 0;
+		if (getenv("WS_GLASS_DEBUG")) { static int dn; if (dn++ < 5) { int np = 0; for (int i = 0; i < n; i++) np += g[i].has_params; fprintf(stderr, "glass: %d shapes, %d with parameters, modes", n, np); for (int i = 0; i < n; i++) fprintf(stderr, " %d", g[i].mode); fprintf(stderr, "\n"); } }
 		for (int i = 0; i < n; i++) { if ((g[i].mode == 9 || g[i].mode == 10) && g[i].has_params && ws_glass_gpu(img, &g[i], ox, oy)) any = 1; else if (k < WS_GLASS_MAX) rest[k++] = g[i]; }
 		if (any) { if (k > 0) ws_glass_regions(img, rest, k, ox, oy); return; }
 	}

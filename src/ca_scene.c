@@ -829,19 +829,22 @@ static void paint_scene(ca_canvas *win)
 }
 /* The glass of a context: the rectangles of the CASDFElementLayers (the shapes of the Liquid Glass of macOS 26: NSGlassEffectView / SwiftUI glassEffect put them under a CABackdropLayer with the glassBackground filter), in the window of the context (origin at the top left), with their corner radius. */
 /* The glass parameters of a shape: the glassBackground filter of the CABackdropLayer drawn before it (SwiftUI puts the backdrop with the filter beside the SDFLayer of the shapes, in front of it in the sublayers) */
-static void glass_walk(uint64_t id, double ox, double oy, int H, ca_glass *out, int max, int *n, int depth, const layer_t *gl)
+static void glass_walk(uint64_t id, double ox, double oy, double pbx, double pby, int pflip, double ph, int H, ca_glass *out, int max, int *n, int depth, const layer_t *gl)
 {
 	layer_t *l = find(id); if (!l || depth > 64) return;
-	double x = ox + l->px_ - l->w / 2, y = oy + l->py_ - l->h / 2;
+	/* the frame of the layer as paint_layer_f has it (CA::Render::Layer::compute_frame_offset): position - (anchor * size + bounds origin), in the parent's bounds space, flipped in a flipped parent */
+	double ax = (l->unk[3] >> 24) & 1 ? 0.0 : 0.5, fx = l->dd[0] - (ax * l->w + l->dd[2]), fy = l->dd[1] - (ax * l->h + l->dd[3]);
+	if (pflip && depth > 0) fy = ph - (fy + l->h);
+	double x = depth == 0 ? 0 : ox + fx - pbx, y = depth == 0 ? 0 : oy + fy - pby;
 	if (l->cls == 'E' && l->w > 3 && l->h > 3 && *n < max) { out[*n].x = (int)(x + 0.5); out[*n].y = (int)(H - (y + l->h) + 0.5); out[*n].w = (int)(l->w + 0.5); out[*n].h = (int)(l->h + 0.5); out[*n].radius = (int)(l->cr + 0.5); out[*n].mode = (l->w < 160 || l->h < 160) ? 10 : 9;
 		out[*n].p = gl ? (const float (*)[4])gl->gp : NULL; out[*n].set = gl ? gl->gset : NULL; (*n)++; }
 	if (l->gp) gl = l;
-	for (int i = 0; i < l->nsubs; i++) { layer_t *c = find(l->subs[i]); glass_walk(l->subs[i], x, y, H, out, max, n, depth + 1, gl); if (c && c->gp) gl = c; }
+	for (int i = 0; i < l->nsubs; i++) { layer_t *c = find(l->subs[i]); glass_walk(l->subs[i], x, y, l->dd[2], l->dd[3], (l->unk[2] & 0x800) != 0, l->h, H, out, max, n, depth + 1, gl); if (c && c->gp) gl = c; }
 }
 int ca_scene_glass(int scene, int root, int height, ca_glass *out, int max)
 {
 	int n = 0; if (scene < 0 || scene >= nscenes || root < 0 || root >= scenes[scene]->nroots) return 0;
-	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, height, out, max, &n, 0, NULL); return n;
+	S = scenes[scene]; glass_walk(S->rootid[root], 0, 0, 0, 0, 0, 0, height, out, max, &n, 0, NULL); return n;
 }
 
 /* position and size of the root layer of a root of a scene (the content of the window that its context is bound to: the layer's position is the window's origin in the coordinates of the screen's top-left corner, as far as known) */

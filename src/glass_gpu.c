@@ -11,7 +11,7 @@
 #include <string.h>
 
 static int state;		/* 0 not tried, 1 ready, -1 not available */
-static uint64_t pso;
+static uint64_t pso, pso_srgb;
 
 static int glass_init(void)
 {
@@ -35,6 +35,15 @@ static int glass_init(void)
 	else fprintf(stderr, "WindowServer: glass pipeline: %.*s\n", (int)n, a ? (char *)a : "");
 	free(a);
 	if (!pso) return 0;
+	if (getenv("WS_GLASS_BLEND") && !atoi(getenv("WS_GLASS_BLEND"))) {		/* WS_GLASS_BLEND=0: the shader's output replaces the pixels (experiment) */
+		rd->color[0].blending = 0; uint64_t p2 = 0; a = NULL; n = 0;
+		if (pmwc_call(PMW_RENDER_PSO_NEW, q, sizeof q, &a, &n) == 0 && n >= 8) memcpy(&p2, a, 8);
+		free(a); if (p2) pso = p2;
+	}
+	rd->color[0].format = 81;
+	a = NULL; n = 0;
+	if (pmwc_call(PMW_RENDER_PSO_NEW, q, sizeof q, &a, &n) == 0 && n >= 8) memcpy(&pso_srgb, a, 8);
+	free(a);
 	state = 1;
 	fprintf(stderr, "WindowServer: Liquid Glass through QuartzCore's shaders\n");
 	return 1;
@@ -73,18 +82,19 @@ static void putf(uint8_t *u, int off, float v) { memcpy(u + off, &v, 4); }
 int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 {
 	if (!g->has_params || !glass_init()) return 0;
-	int sx = ox + g->rect.x, sy = oy + g->rect.y, sw = g->rect.w, sh = g->rect.h, M = 64;
+	int sx = ox + g->rect.x, sy = oy + g->rect.y, sw = g->rect.w, sh = g->rect.h, M = getenv("WS_GLASS_MARGIN") ? atoi(getenv("WS_GLASS_MARGIN")) : 160;	/* the backdrop around the shape: the blurred levels reach far (a narrow margin repeats its edge columns: stripes) */
 	int x0 = sx - M < 0 ? 0 : sx - M, y0 = sy - M < 0 ? 0 : sy - M, x1 = sx + sw + M > img->w ? img->w : sx + sw + M, y1 = sy + sh + M > img->h ? img->h : sy + sh + M;
 	int W = x1 - x0, H = y1 - y0;
-	if (W < 8 || H < 8) return 0;
+	if (W < 8 || H < 8) { if (getenv("WS_GLASS_DEBUG")) fprintf(stderr, "glass_gpu: region %dx%d too small (origin %d,%d rect %d,%d %dx%d, image %dx%d)\n", W, H, ox, oy, g->rect.x, g->rect.y, g->rect.w, g->rect.h, img->w, img->h); return 0; }
 	int levels = 1; while ((W >> levels) > 0 || (H >> levels) > 0) levels++;
 
 	/* the backdrop with its mipmaps (2 x 2 averages) */
-	pmw_texture_desc td = { 2, 80, 1 | 4, 0, (uint64_t)W, (uint64_t)H, 1, (uint64_t)levels, 1, 1, 0 };
+	uint32_t fmt = getenv("WS_GLASS_SRGB") && atoi(getenv("WS_GLASS_SRGB")) ? 81 /* BGRA8Unorm_sRGB: the shader works on linear values */ : 80;
+	pmw_texture_desc td = { 2, fmt, 1 | 4, 0, (uint64_t)W, (uint64_t)H, 1, (uint64_t)levels, 1, 1, 0 };
 	uint64_t src = pmwc_texture(&td);
-	pmw_texture_desc tdd = { 2, 80, 1 | 4, 0, (uint64_t)W, (uint64_t)H, 1, 1, 1, 1, 0 };
+	pmw_texture_desc tdd = { 2, fmt, 1 | 4, 0, (uint64_t)W, (uint64_t)H, 1, 1, 1, 1, 0 };
 	uint64_t dst = pmwc_texture(&tdd);
-	if (!src || !dst) { pmwc_release(src); pmwc_release(dst); return 0; }
+	if (!src || !dst) { if (getenv("WS_GLASS_DEBUG")) fprintf(stderr, "glass_gpu: textures %dx%d levels %d: %llx %llx\n", W, H, levels, (unsigned long long)src, (unsigned long long)dst); pmwc_release(src); pmwc_release(dst); return 0; }
 	uint8_t *lv = malloc((size_t)W * H * 4), *nx = malloc((size_t)W * H * 4);
 	for (int y = 0; y < H; y++) memcpy(lv + (size_t)y * W * 4, img->px + (size_t)(y0 + y) * img->stride + (size_t)x0 * 4, (size_t)W * 4);
 	pmwc_texture_replace(src, (uint32_t)W, (uint32_t)H, lv, (uint64_t)W * 4);
@@ -92,9 +102,12 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	int lw = W, lh = H;
 	for (int l = 1; l < levels; l++) {
 		int nw = lw > 1 ? lw / 2 : 1, nh = lh > 1 ? lh / 2 : 1;
+		/* a 4 x 4 tent (1 3 3 1) around each 2 x 2 block: smoother levels than a plain average (the shader blends between levels for its blur; QuartzCore makes its levels with its own downsample shaders) */
 		for (int y = 0; y < nh; y++) for (int x = 0; x < nw; x++) for (int c = 0; c < 4; c++) {
-			int xa = 2 * x < lw ? 2 * x : lw - 1, xb = 2 * x + 1 < lw ? 2 * x + 1 : lw - 1, ya = 2 * y < lh ? 2 * y : lh - 1, yb = 2 * y + 1 < lh ? 2 * y + 1 : lh - 1;
-			nx[(y * nw + x) * 4 + c] = (uint8_t)((lv[(ya * lw + xa) * 4 + c] + lv[(ya * lw + xb) * 4 + c] + lv[(yb * lw + xa) * 4 + c] + lv[(yb * lw + xb) * 4 + c] + 2) / 4);
+			static const int wt[4] = { 1, 3, 3, 1 }; int acc = 0;
+			for (int j = 0; j < 4; j++) { int yy = 2 * y - 1 + j; yy = yy < 0 ? 0 : yy >= lh ? lh - 1 : yy;
+				for (int i = 0; i < 4; i++) { int xx = 2 * x - 1 + i; xx = xx < 0 ? 0 : xx >= lw ? lw - 1 : xx; acc += wt[i] * wt[j] * lv[(yy * lw + xx) * 4 + c]; } }
+			nx[(y * nw + x) * 4 + c] = (uint8_t)((acc + 32) / 64);
 		}
 		{ uint8_t *t = lv; lv = nx; nx = t; } lw = nw; lh = nh;
 		size_t hd = 8 + sizeof(pmw_region) + 8 + 16; uint8_t *q = malloc(hd + (size_t)lw * lh * 4);
@@ -107,7 +120,7 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	uint8_t u[320]; memset(u, 0, sizeof u);
 	float R = (float)(g->radius > 0 ? g->radius : 0.01f), hx = sw / 2.0f, hy = sh / 2.0f;
 	float ax = 2.8915570f - 1.4457785f * 2 * hx / (1.528665f * R), ay = 2.8915570f - 1.4457785f * 2 * hy / (1.528665f * R);
-	float sdf[12] = { hx, hy, 4, 0,  1, 0, 0, 1,  ax < 0 ? 0 : ax > 1 ? 1 : ax, ay < 0 ? 0 : ay > 1 ? 1 : ay, 1.528665f * R, 0 };
+	float sdf[12] = { hx, hy, 4, 0,  1, 0, 0, 1,  ax < 0 ? 0 : ax > 1 ? 1 : ax, ay < 0 ? 0 : ay > 1 ? 1 : ay, R, 0 };	/* arg2.z = R: supercircle_sdf scales it by 1.528665 itself (its IR) */
 	memcpy(u, sdf, sizeof sdf);
 	uint8_t *G = u + 48;
 	float dm[4] = { 1.0f / W, 0, 0, 1.0f / H }; memcpy(G, dm, 16);
@@ -135,6 +148,13 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	putf(G, 240, 1.0f); putf(G, 244, K(g, 0x167, 0)); putf(G, 248, K(g, 0x19e, 0.97f)); putf(G, 252, 1.0f);
 	putf(G, 256, (a != b || b != c || c != d || inner != 0 || outer != 0) ? 1.0f : 0.0f);
 	float edr = 1;
+	if (getenv("WS_GLASS_DEBUG")) {		/* the keys and what they became, once per shape size */
+		static int done; if (done++ < 2) {
+			fprintf(stderr, "glass_gpu: shape %dx%d r %d region %dx%d levels %d\n", sw, sh, g->radius, W, H, levels);
+			for (int i = 0; i < WS_GLASS_KEYS; i++) if (g->set[i]) fprintf(stderr, "  key %#x = %g %g %g %g\n", WS_GLASS_KEY0 + i, g->p[i][0], g->p[i][1], g->p[i][2], g->p[i][3]);
+			for (int o2 = 0; o2 < 272; o2 += 16) { float f[4]; memcpy(f, G + o2, 16); fprintf(stderr, "  u%3d: %g %g %g %g\n", o2, f[0], f[1], f[2], f[3]); }
+		}
+	}
 
 	/* a quad over the region: clip-space position, sdf_uv = points from the shape's centre, src_uv in the backdrop texture */
 	float cx = sx + hx - x0, cy = sy + hy - y0;
@@ -148,7 +168,7 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	pmw_render_pass rp; memset(&rp, 0, sizeof rp);
 	rp.color[0].tex = dst; rp.color[0].load = 1; rp.color[0].store = 1;
 	pmwc_cmd(&L, PMWC_RENDER_BEGIN, &rp, sizeof rp);
-	pmwc_cmd(&L, PMWC_SET_RENDER_PSO, &pso, 8);
+	pmwc_cmd(&L, PMWC_SET_RENDER_PSO, fmt == 81 ? &pso_srgb : &pso, 8);
 #define BYTES(stage, idx, ptr, len) { uint8_t b[8 + (len)]; uint32_t s2[2] = { stage, idx }; memcpy(b, s2, 8); memcpy(b + 8, ptr, len); pmwc_cmd(&L, PMWC_SET_BYTES, b, (uint16_t)sizeof b); }
 	BYTES(1, 0, vx, sizeof vx); BYTES(1, 2, mvp, 64); BYTES(1, 3, texmat, 16); BYTES(2, 1, u, 320); BYTES(2, 6, &edr, 4);
 #undef BYTES
@@ -156,6 +176,7 @@ int ws_glass_gpu(ws_surface *img, const ws_glass *g, int ox, int oy)
 	{ uint64_t dr[5]; uint32_t pr[2] = { 3, 0 }; memcpy(dr, pr, 8); dr[1] = 0; dr[2] = 6; dr[3] = 1; dr[4] = 0; pmwc_cmd(&L, PMWC_DRAW, dr, sizeof dr); }
 	pmwc_cmd(&L, PMWC_END, NULL, 0);
 	int ok = pmwc_commit_wait(&L) == 0;
+	if (!ok && getenv("WS_GLASS_DEBUG")) fprintf(stderr, "glass_gpu: the command buffer failed\n");
 	free(L.b);
 	if (ok && pmwc_texture_get(dst, (uint32_t)W, (uint32_t)H, nx, (uint64_t)W * 4) == 0)
 		for (int y = 0; y < H; y++) memcpy(img->px + (size_t)(y0 + y) * img->stride + (size_t)x0 * 4, nx + (size_t)y * W * 4, (size_t)W * 4);
